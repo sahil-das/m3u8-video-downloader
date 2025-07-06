@@ -1,8 +1,11 @@
 import customtkinter as ctk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 from download_worker import DownloadWorker
 import os
 import uuid
+import threading
+
+MAX_ACTIVE_DOWNLOADS = 2
 
 
 class M3U8DownloaderGUI:
@@ -15,14 +18,19 @@ class M3U8DownloaderGUI:
 
         self.output_dir = None
         self.downloads = {}
+        self.download_queue = []
+        self.active_downloads = 0
 
         self.folder_button = ctk.CTkButton(self.app, text="Select Download Folder", command=self.select_folder)
         self.folder_button.pack(pady=10)
 
+        self.folder_label = ctk.CTkLabel(self.app, text="No folder selected", text_color="gray")
+        self.folder_label.pack()
+
         self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=600)
         self.url_entry.pack(pady=10)
 
-        self.download_button = ctk.CTkButton(self.app, text="Start Download", command=self.start_download)
+        self.download_button = ctk.CTkButton(self.app, text="Start Download", command=self.enqueue_download)
         self.download_button.pack(pady=5)
 
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=750, height=480)
@@ -32,20 +40,22 @@ class M3U8DownloaderGUI:
         folder = filedialog.askdirectory()
         if folder:
             self.output_dir = folder
+            self.folder_label.configure(text=f"Selected Folder: {folder}", text_color="lightgreen")
 
-    def start_download(self):
+    def enqueue_download(self):
+        url = self.url_entry.get().strip()
+
         if not self.output_dir:
+            messagebox.showwarning("No Folder Selected", "Please select a download folder before starting.")
             return
 
-        url = self.url_entry.get().strip()
         if not url:
             return
 
         self.url_entry.delete(0, ctk.END)
-
         name = str(uuid.uuid4())[:8]
 
-        # UI elements for this download
+        # UI for this download
         label = ctk.CTkLabel(self.scrollable_frame, text=f"{url[:60]}...", wraplength=700)
         label.pack(anchor="w", padx=10, pady=3)
 
@@ -53,7 +63,7 @@ class M3U8DownloaderGUI:
         progress.set(0)
         progress.pack(padx=10, pady=3)
 
-        status = ctk.CTkLabel(self.scrollable_frame, text="Starting...")
+        status = ctk.CTkLabel(self.scrollable_frame, text="Queued...")
         status.pack(anchor="w", padx=10)
 
         btn_frame = ctk.CTkFrame(self.scrollable_frame)
@@ -65,30 +75,39 @@ class M3U8DownloaderGUI:
         pause_btn.grid(row=0, column=0, padx=5)
         cancel_btn.grid(row=0, column=1, padx=5)
 
-        # Worker thread
-        worker = DownloadWorker(
-            name=name,
-            url=url,
-            output_dir=self.output_dir,
-            progress_callback=self.update_progress,
-            done_callback=self.download_done
-        )
-
-        # Store everything
         self.downloads[name] = {
-            "worker": worker,
+            "url": url,
+            "label": label,
             "progress": progress,
             "status": status,
             "pause_btn": pause_btn,
             "cancel_btn": cancel_btn,
             "paused": False,
+            "worker": None
         }
 
-        # Bind pause/resume
         pause_btn.configure(command=lambda: self.toggle_pause(name))
         cancel_btn.configure(command=lambda: self.cancel_download(name))
 
-        worker.start()
+        self.download_queue.append(name)
+        self.try_start_next()
+
+    def try_start_next(self):
+        while self.active_downloads < MAX_ACTIVE_DOWNLOADS and self.download_queue:
+            name = self.download_queue.pop(0)
+            info = self.downloads[name]
+
+            worker = DownloadWorker(
+                name=name,
+                url=info["url"],
+                output_dir=self.output_dir,
+                progress_callback=self.update_progress,
+                done_callback=self.download_done
+            )
+            self.downloads[name]["worker"] = worker
+            self.downloads[name]["status"].configure(text="Starting...")
+            self.active_downloads += 1
+            worker.start()
 
     def toggle_pause(self, name):
         d = self.downloads[name]
@@ -103,10 +122,16 @@ class M3U8DownloaderGUI:
 
     def cancel_download(self, name):
         d = self.downloads[name]
-        d["worker"].cancel()
+        if d["worker"]:
+            d["worker"].cancel()
         d["status"].configure(text="❌ Cancelled")
         d["pause_btn"].configure(state="disabled")
         d["cancel_btn"].configure(state="disabled")
+
+        if self.downloads[name]["worker"].is_alive():
+            self.active_downloads -= 1
+
+        self.try_start_next()
 
     def update_progress(self, name, percent, downloaded_mb, total_mb, speed):
         d = self.downloads.get(name)
@@ -122,6 +147,9 @@ class M3U8DownloaderGUI:
             d["status"].configure(text=f"{'✅' if success else '❌'} {msg}")
             d["pause_btn"].configure(state="disabled")
             d["cancel_btn"].configure(state="disabled")
+
+        self.active_downloads -= 1
+        self.try_start_next()
 
     def run(self):
         self.app.mainloop()

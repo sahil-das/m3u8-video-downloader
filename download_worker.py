@@ -17,7 +17,7 @@ class DownloadWorker(threading.Thread):
         self.done_callback = done_callback
 
         self._pause_event = threading.Event()
-        self._pause_event.set()  # Start in unpaused state
+        self._pause_event.set()
         self._cancelled = threading.Event()
 
         self.segment_data = []
@@ -47,16 +47,20 @@ class DownloadWorker(threading.Thread):
             downloaded = 0
             downloaded_bytes = 0
             start_time = time.time()
-
             session = requests.Session()
 
             def download_segment(i, segment_url):
-                if self._cancelled.is_set():
-                    return None
-                self._wait_if_paused()
-                response = session.get(segment_url, timeout=10)
-                response.raise_for_status()
-                return i, response.content
+                for attempt in range(3):  # Retry up to 3 times
+                    if self._cancelled.is_set():
+                        return None
+                    self._wait_if_paused()
+                    try:
+                        response = session.get(segment_url, timeout=10)
+                        response.raise_for_status()
+                        return i, response.content
+                    except Exception:
+                        time.sleep(1)
+                raise Exception(f"Failed to download segment {i} after 3 attempts.")
 
             with ThreadPoolExecutor(max_workers=16) as executor:
                 futures = {
@@ -67,7 +71,6 @@ class DownloadWorker(threading.Thread):
                 for future in as_completed(futures):
                     if self._cancelled.is_set():
                         raise Exception("Download cancelled by user.")
-
                     result = future.result()
                     if result is None:
                         continue
@@ -90,21 +93,16 @@ class DownloadWorker(threading.Thread):
                     f.write(chunk)
 
             mp4_file = os.path.join(self.output_dir, f"{self.name}.mp4")
-
             self.convert_to_mp4(ts_file, mp4_file)
+            os.remove(ts_file)
 
-            os.remove(ts_file)  # delete temporary .ts file
-
-            self.done_callback(self.name, True, mp4_file)
+            self.done_callback(self.name, True, f"Saved as {os.path.basename(mp4_file)}")
         except Exception as e:
             self.done_callback(self.name, False, str(e))
 
     def convert_to_mp4(self, input_path, output_path):
-        try:
-            subprocess.run(
-                ['ffmpeg', '-y', '-i', input_path, '-c', 'copy', output_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        except Exception as e:
-            raise Exception(f"Conversion failed: {e}")
+        subprocess.run(
+            ['ffmpeg', '-y', '-i', input_path, '-c', 'copy', output_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
