@@ -10,7 +10,7 @@ class M3U8DownloaderGUI:
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.app = ctk.CTk()
-        self.app.geometry("900x680")
+        self.app.geometry("920x680")
         self.app.title("🎬 M3U8 Batch Video Downloader")
 
         self.output_dir = None
@@ -23,30 +23,37 @@ class M3U8DownloaderGUI:
         header = ctk.CTkLabel(self.app, text="📥 M3U8 Batch Video Downloader", font=ctk.CTkFont(size=20, weight="bold"))
         header.pack(pady=10)
 
+        # ── Control Frame ─────────────────────────────
         control_frame = ctk.CTkFrame(self.app)
-        control_frame.pack(pady=5)
+        control_frame.pack(pady=5, fill="x", padx=10)
 
-        self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder)
-        self.folder_button.grid(row=0, column=0, padx=10, pady=10)
+        self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder, width=150)
+        self.folder_button.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
 
-        self.folder_label = ctk.CTkLabel(control_frame, text="No folder selected", text_color="gray", anchor="w", width=500)
-        self.folder_label.grid(row=0, column=1, padx=10)
+        self.folder_label = ctk.CTkLabel(control_frame, text="No folder selected", text_color="gray", anchor="w")
+        self.folder_label.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="w")
+
+        self.parallel_label = ctk.CTkLabel(control_frame, text="Maximum Parallel Downloads")
+        self.parallel_label.grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
 
         self.parallel_dropdown = ctk.CTkOptionMenu(control_frame, values=[str(i) for i in range(1, 11)],
                                                    command=self.set_parallel, width=100)
         self.parallel_dropdown.set("3")
-        self.parallel_dropdown.grid(row=0, column=2, padx=10)
+        self.parallel_dropdown.grid(row=1, column=2, padx=10, pady=(0, 10), sticky="w")
 
+        control_frame.grid_columnconfigure(1, weight=1)
+
+        # ── Input Fields ──────────────────────────────
         self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
-        self.url_entry.pack(pady=10)
+        self.url_entry.pack(pady=(15, 5))
 
-        self.filename_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=400)
-        self.filename_entry.pack(pady=5)
+        self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
+        self.name_entry.pack(pady=(0, 10))
 
         self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
 
-        self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=850, height=440)
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
 
     def set_parallel(self, value):
@@ -64,26 +71,27 @@ class M3U8DownloaderGUI:
             return
 
         url = self.url_entry.get().strip()
-        filename = self.filename_entry.get().strip()
+        custom_name = self.name_entry.get().strip()
         if not url:
             return
 
         self.url_entry.delete(0, ctk.END)
-        self.filename_entry.delete(0, ctk.END)
+        self.name_entry.delete(0, ctk.END)
 
-        name = filename if filename else str(uuid.uuid4())[:8]
+        name = custom_name if custom_name else str(uuid.uuid4())[:8]
 
         frame = ctk.CTkFrame(self.scrollable_frame)
         frame.pack(padx=10, pady=5, fill="x")
 
-        title = ctk.CTkLabel(frame, text=url[:80] + "...", anchor="w")
+        title_text = custom_name if custom_name else url[:80] + "..."
+        title = ctk.CTkLabel(frame, text=title_text, anchor="w", font=ctk.CTkFont(weight="bold"))
         title.pack(anchor="w", padx=10, pady=(5, 0))
 
         progress = ctk.CTkProgressBar(frame)
         progress.set(0)
         progress.pack(fill="x", padx=10, pady=5)
 
-        status = ctk.CTkLabel(frame, text="⏳ Waiting...", text_color="orange")
+        status = ctk.CTkLabel(frame, text="⏳ Waiting...", text_color="yellow")
         status.pack(anchor="w", padx=10)
 
         btn_row = ctk.CTkFrame(frame)
@@ -122,7 +130,7 @@ class M3U8DownloaderGUI:
             if d["paused"]:
                 d["worker"].resume()
                 d["pause_btn"].configure(text="Pause")
-                d["status"].configure(text="▶️ Resumed", text_color="lightblue")
+                d["status"].configure(text="▶️ Resumed", text_color="skyblue")
                 d["paused"] = False
                 self.active_downloads += 1
 
@@ -147,8 +155,8 @@ class M3U8DownloaderGUI:
         d = self.downloads[name]
         d["progress"].set(percent / 100)
         d["status"].configure(
-            text=f"{percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB @ {speed:.2f} MB/s",
-            text_color="white"
+            text=f"⬇️ {percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB @ {speed:.2f} MB/s",
+            text_color="lightblue"
         )
 
     def download_done(self, name, success, message):
@@ -158,7 +166,7 @@ class M3U8DownloaderGUI:
 
         if success:
             d["status"].configure(text=f"✅ {message}", text_color="lightgreen")
-            output_path = os.path.join(self.output_dir, f"{name}.mp4")
+            output_path = os.path.join(self.output_dir, f"{d['custom_name']}.mp4")
             d["file_label"].configure(text=output_path, text_color="#00C0FF")
             d["file_label"].bind("<Button-1>", lambda e, path=output_path: webbrowser.open(f'file:///{path}'))
         else:
@@ -176,7 +184,7 @@ class M3U8DownloaderGUI:
             if self.active_downloads < self.max_parallel:
                 d["worker"].resume()
                 d["pause_btn"].configure(text="Pause")
-                d["status"].configure(text="▶️ Resumed", text_color="lightblue")
+                d["status"].configure(text="▶️ Resumed", text_color="skyblue")
                 d["paused"] = False
                 self.active_downloads += 1
             else:
@@ -186,7 +194,7 @@ class M3U8DownloaderGUI:
         else:
             d["worker"].pause()
             d["pause_btn"].configure(text="Resume")
-            d["status"].configure(text="⏸️ Paused", text_color="yellow")
+            d["status"].configure(text="⏸️ Paused", text_color="orange")
             d["paused"] = True
             self.active_downloads -= 1
             self.try_start_next()
