@@ -3,6 +3,7 @@ import requests
 import os
 import time
 import m3u8  # You must install python-m3u8 via pip: pip install m3u8
+from urllib.parse import urljoin
 
 
 class DownloadWorker(threading.Thread):
@@ -25,7 +26,7 @@ class DownloadWorker(threading.Thread):
         try:
             # Step 1: Parse M3U8
             playlist = m3u8.load(self.url)
-            self.segment_urls = [seg.uri for seg in playlist.segments]
+            self.segment_urls = [urljoin(self.url, seg.uri) for seg in playlist.segments]
 
             total_segments = len(self.segment_urls)
             if total_segments == 0:
