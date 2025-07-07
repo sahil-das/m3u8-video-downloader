@@ -1,19 +1,25 @@
+import ctypes
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
+from download_worker import DownloadWorker
 import os
 import uuid
 import webbrowser
-from tkinter import filedialog, messagebox
-from tkinterdnd2 import DND_FILES, DND_TEXT, TkinterDnD
 
-import customtkinter as ctk
-from download_worker import DownloadWorker
-
+# 🛠 Fix blurry UI on high-DPI displays
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except:
+    pass
 
 class M3U8DownloaderGUI:
     def __init__(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
+        ctk.set_widget_scaling(1.1)
+        ctk.set_window_scaling(1.1)
 
-        self.app = TkinterDnD.Tk()
+        self.app = ctk.CTk()
         self.app.geometry("920x680")
         self.app.title("🎬 M3U8 Batch Video Downloader")
 
@@ -26,6 +32,7 @@ class M3U8DownloaderGUI:
         self.segment_threads = 8
 
         self.setup_gui()
+        self.enable_drag_and_drop()
 
     def setup_gui(self):
         header = ctk.CTkLabel(self.app, text="📥 M3U8 Batch Video Downloader", font=ctk.CTkFont(size=20, weight="bold"))
@@ -44,8 +51,6 @@ class M3U8DownloaderGUI:
         self.folder_entry.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
         self.folder_entry.bind("<FocusIn>", self.clear_placeholder)
         self.folder_entry.bind("<FocusOut>", self.restore_placeholder)
-        self.folder_entry.drop_target_register(DND_FILES)
-        self.folder_entry.dnd_bind('<<Drop>>', self.on_folder_drop)
 
         self.parallel_label = ctk.CTkLabel(control_frame, text="Maximum Parallel Downloads")
         self.parallel_label.grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
@@ -66,15 +71,11 @@ class M3U8DownloaderGUI:
         control_frame.grid_columnconfigure(1, weight=1)
 
         # ── Input Fields ──────────────────
-        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
+        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter or drop M3U8 URL", width=700)
         self.url_entry.pack(pady=(15, 5))
-        self.url_entry.drop_target_register(DND_TEXT)
-        self.url_entry.dnd_bind('<<Drop>>', self.on_url_drop)
 
         self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
         self.name_entry.pack(pady=(0, 10))
-        self.name_entry.drop_target_register(DND_TEXT)
-        self.name_entry.dnd_bind('<<Drop>>', self.on_name_drop)
 
         self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
@@ -82,28 +83,44 @@ class M3U8DownloaderGUI:
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
 
-    # ── DnD Handlers ─────────────────────
-    def on_folder_drop(self, event):
-        path = event.data.strip().strip("{").strip("}")
-        if os.path.isdir(path):
-            self.output_dir = path
-            self.folder_entry.configure(text_color="lightgreen")
-            self.folder_entry.delete(0, ctk.END)
-            self.folder_entry.insert(0, path)
+    def enable_drag_and_drop(self):
+        def setup_drag_drop(widget, callback):
+            try:
+                widget.tk.call('tkdnd::drag_source', 'register', widget._w, '*')
+                widget.tk.call('tkdnd::drop_target', 'register', widget._w, '*')
+                widget._w.bind('<<Drop>>', callback)
+            except Exception as e:
+                print(f"Drag-and-drop not supported: {e}")
 
-    def on_url_drop(self, event):
-        text = event.data.strip()
-        if text.startswith("http"):
-            self.url_entry.delete(0, ctk.END)
-            self.url_entry.insert(0, text)
+        def drop_url(event):
+            dropped = event.data.strip()
+            if dropped.startswith('{') and dropped.endswith('}'):
+                dropped = dropped[1:-1]
+            if dropped.startswith("http") and ".m3u8" in dropped:
+                self.url_entry.delete(0, ctk.END)
+                self.url_entry.insert(0, dropped)
+                self.url_entry.configure(text_color="white")
 
-    def on_name_drop(self, event):
-        text = os.path.basename(event.data.strip())
-        base = os.path.splitext(text)[0]
-        self.name_entry.delete(0, ctk.END)
-        self.name_entry.insert(0, base)
+        def drop_name(event):
+            dropped = event.data.strip()
+            if dropped.startswith('{') and dropped.endswith('}'):
+                dropped = dropped[1:-1]
+            if dropped.endswith(".mp4"):
+                dropped = dropped[:-4]
+            self.name_entry.delete(0, ctk.END)
+            self.name_entry.insert(0, dropped)
 
-    # (The rest of the code remains unchanged — includes start_download, update_progress, etc.)
+        def drop_folder(event):
+            dropped = event.data.strip().strip('{}')
+            if os.path.isdir(dropped):
+                self.output_dir = dropped
+                self.folder_entry.configure(text_color="lightgreen")
+                self.folder_entry.delete(0, ctk.END)
+                self.folder_entry.insert(0, dropped)
+
+        setup_drag_drop(self.url_entry, drop_url)
+        setup_drag_drop(self.name_entry, drop_name)
+        setup_drag_drop(self.folder_entry, drop_folder)
 
     def clear_placeholder(self, event=None):
         if self.folder_entry.get() == "No folder selected":
@@ -115,8 +132,11 @@ class M3U8DownloaderGUI:
             self.folder_entry.insert(0, "No folder selected")
             self.folder_entry.configure(text_color="gray")
 
-    def set_parallel(self, value): self.max_parallel = int(value)
-    def set_segment_threads(self, value): self.segment_threads = int(value)
+    def set_parallel(self, value):
+        self.max_parallel = int(value)
+
+    def set_segment_threads(self, value):
+        self.segment_threads = int(value)
 
     def select_folder(self):
         folder = filedialog.askdirectory()
@@ -125,6 +145,7 @@ class M3U8DownloaderGUI:
             self.folder_entry.configure(text_color="lightgreen")
             self.folder_entry.delete(0, ctk.END)
             self.folder_entry.insert(0, folder)
+
     def start_download(self):
         url = self.url_entry.get().strip()
         custom_name = self.name_entry.get().strip()
