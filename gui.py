@@ -23,7 +23,6 @@ class M3U8DownloaderGUI:
         self.segment_threads = 8
 
         self.setup_gui()
-        self.enable_drag_and_drop()
 
     def setup_gui(self):
         header = ctk.CTkLabel(self.app, text="📥 M3U8 Batch Video Downloader", font=ctk.CTkFont(size=20, weight="bold"))
@@ -62,7 +61,7 @@ class M3U8DownloaderGUI:
         control_frame.grid_columnconfigure(1, weight=1)
 
         # ── Input Fields ──────────────────
-        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter or drop M3U8 URL", width=700)
+        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
         self.url_entry.pack(pady=(15, 5))
 
         self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
@@ -73,27 +72,6 @@ class M3U8DownloaderGUI:
 
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
-
-    def enable_drag_and_drop(self):
-        def drop_url(event):
-            try:
-                dropped = event.data.strip()
-                if dropped.startswith('{') and dropped.endswith('}'):
-                    dropped = dropped[1:-1]
-                if dropped.startswith("http") and ".m3u8" in dropped:
-                    self.url_entry.delete(0, ctk.END)
-                    self.url_entry.insert(0, dropped)
-                    self.url_entry.configure(text_color="white")
-            except Exception as e:
-                messagebox.showerror("Drop Error", str(e))
-
-        try:
-            self.url_entry.tk.call('tkdnd::drag_source', 'register', self.url_entry._w, '*')
-            self.url_entry.tk.call('tkdnd::drop_target', 'register', self.url_entry._w, '*')
-            self.url_entry.tk.createcommand('drop_url', drop_url)
-            self.url_entry._w.bind('<<Drop>>', drop_url)
-        except Exception as e:
-            print("Drag-and-drop not supported:", e)
 
     def clear_placeholder(self, event=None):
         if self.folder_entry.get() == "No folder selected":
