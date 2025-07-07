@@ -28,10 +28,11 @@ class M3U8DownloaderGUI:
         control_frame.pack(pady=5, fill="x", padx=10)
 
         self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder, width=150)
-        self.folder_button.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
-
+        self.folder_button.grid(row=0, column=0, padx=10, pady=(10, 2), sticky="w")
+        
         self.folder_label = ctk.CTkLabel(control_frame, text="No folder selected", text_color="gray", anchor="w")
-        self.folder_label.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="w")
+        self.folder_label.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
+
 
         self.parallel_label = ctk.CTkLabel(control_frame, text="Maximum Parallel Downloads")
         self.parallel_label.grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
