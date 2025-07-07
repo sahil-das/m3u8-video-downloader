@@ -1,16 +1,19 @@
-import customtkinter as ctk
-from tkinter import filedialog, messagebox
-from download_worker import DownloadWorker
 import os
 import uuid
 import webbrowser
+from tkinter import filedialog, messagebox
+from tkinterdnd2 import DND_FILES, DND_TEXT, TkinterDnD
+
+import customtkinter as ctk
+from download_worker import DownloadWorker
+
 
 class M3U8DownloaderGUI:
     def __init__(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.app = ctk.CTk()
+        self.app = TkinterDnD.Tk()
         self.app.geometry("920x680")
         self.app.title("🎬 M3U8 Batch Video Downloader")
 
@@ -41,6 +44,8 @@ class M3U8DownloaderGUI:
         self.folder_entry.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
         self.folder_entry.bind("<FocusIn>", self.clear_placeholder)
         self.folder_entry.bind("<FocusOut>", self.restore_placeholder)
+        self.folder_entry.drop_target_register(DND_FILES)
+        self.folder_entry.dnd_bind('<<Drop>>', self.on_folder_drop)
 
         self.parallel_label = ctk.CTkLabel(control_frame, text="Maximum Parallel Downloads")
         self.parallel_label.grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
@@ -63,15 +68,42 @@ class M3U8DownloaderGUI:
         # ── Input Fields ──────────────────
         self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
         self.url_entry.pack(pady=(15, 5))
+        self.url_entry.drop_target_register(DND_TEXT)
+        self.url_entry.dnd_bind('<<Drop>>', self.on_url_drop)
 
         self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
         self.name_entry.pack(pady=(0, 10))
+        self.name_entry.drop_target_register(DND_TEXT)
+        self.name_entry.dnd_bind('<<Drop>>', self.on_name_drop)
 
         self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
 
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
+
+    # ── DnD Handlers ─────────────────────
+    def on_folder_drop(self, event):
+        path = event.data.strip().strip("{").strip("}")
+        if os.path.isdir(path):
+            self.output_dir = path
+            self.folder_entry.configure(text_color="lightgreen")
+            self.folder_entry.delete(0, ctk.END)
+            self.folder_entry.insert(0, path)
+
+    def on_url_drop(self, event):
+        text = event.data.strip()
+        if text.startswith("http"):
+            self.url_entry.delete(0, ctk.END)
+            self.url_entry.insert(0, text)
+
+    def on_name_drop(self, event):
+        text = os.path.basename(event.data.strip())
+        base = os.path.splitext(text)[0]
+        self.name_entry.delete(0, ctk.END)
+        self.name_entry.insert(0, base)
+
+    # (The rest of the code remains unchanged — includes start_download, update_progress, etc.)
 
     def clear_placeholder(self, event=None):
         if self.folder_entry.get() == "No folder selected":
@@ -83,11 +115,8 @@ class M3U8DownloaderGUI:
             self.folder_entry.insert(0, "No folder selected")
             self.folder_entry.configure(text_color="gray")
 
-    def set_parallel(self, value):
-        self.max_parallel = int(value)
-
-    def set_segment_threads(self, value):
-        self.segment_threads = int(value)
+    def set_parallel(self, value): self.max_parallel = int(value)
+    def set_segment_threads(self, value): self.segment_threads = int(value)
 
     def select_folder(self):
         folder = filedialog.askdirectory()
@@ -96,7 +125,6 @@ class M3U8DownloaderGUI:
             self.folder_entry.configure(text_color="lightgreen")
             self.folder_entry.delete(0, ctk.END)
             self.folder_entry.insert(0, folder)
-
     def start_download(self):
         url = self.url_entry.get().strip()
         custom_name = self.name_entry.get().strip()
