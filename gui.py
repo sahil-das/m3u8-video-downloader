@@ -161,17 +161,27 @@ class M3U8DownloaderGUI:
         d = self.downloads[name]
         d["pause_btn"].configure(state="disabled")
         d["cancel_btn"].configure(state="disabled")
-
-        if success:
+    
+        output_path = os.path.join(self.output_dir, f"{name}.mp4")
+    
+        if success and os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
             d["status"].configure(text=f"✅ {message}", text_color="lightgreen")
-            output_path = os.path.join(self.output_dir, f"{name}.mp4")
             d["file_label"].configure(text=f"📁 Saved at: {output_path}", text_color="#00C0FF")
             d["file_label"].bind("<Button-1>", lambda e, path=output_path: webbrowser.open(f'file:///{path}'))
         else:
-            d["status"].configure(text=f"❌ {message}", text_color="red")
-
+            d["status"].configure(text="❌ Failed: Empty or corrupt download", text_color="red")
+            d["file_label"].configure(text="")
+    
+            # Optional: remove temp files if any
+            try:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+            except:
+                pass
+    
         d["worker"] = None
         self.try_start_next()
+    
 
     def toggle_pause(self, name):
         d = self.downloads[name]
