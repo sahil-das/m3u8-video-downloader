@@ -3,8 +3,22 @@ import requests
 import os
 import time
 import m3u8
+import subprocess
+import shutil
+import logging
 from urllib.parse import urljoin
 from queue import Queue
+import sys
+
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
+
+
+def get_ffmpeg_path():
+    if getattr(sys, 'frozen', False):
+        # When packaged with PyInstaller
+        return os.path.join(sys._MEIPASS, 'ffmpeg.exe')
+    return os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
+
 
 class DownloadWorker(threading.Thread):
     def __init__(self, name, url, output_dir, progress_callback, done_callback, num_connections=8, max_retries=3):
@@ -14,7 +28,6 @@ class DownloadWorker(threading.Thread):
         self.output_dir = output_dir
         self.progress_callback = progress_callback
         self.done_callback = done_callback
-
         self.num_connections = max(1, min(num_connections, 64))
         self.max_retries = max_retries
 
@@ -23,32 +36,32 @@ class DownloadWorker(threading.Thread):
         self._cancelled = False
 
         self.segment_urls = []
-        self.total_mb = 0
-        self.segment_data = {}
+        self.total_segments = 0
+        self.downloaded_segments = 0
         self.downloaded_bytes = 0
         self.lock = threading.Lock()
         self.start_time = None
+        self.segment_dir = None
 
     def run(self):
         try:
             playlist = m3u8.load(self.url)
 
-            # Handle master playlist
-            if playlist.is_variant:
-                if playlist.playlists:
-                    best = max(playlist.playlists, key=lambda p: p.stream_info.bandwidth)
-                    self.url = urljoin(self.url, best.uri)
-                    playlist = m3u8.load(self.url)
+            if playlist.is_variant and playlist.playlists:
+                best = max(playlist.playlists, key=lambda p: p.stream_info.bandwidth)
+                self.url = urljoin(self.url, best.uri)
+                playlist = m3u8.load(self.url)
 
             self.segment_urls = [urljoin(self.url, seg.uri) for seg in playlist.segments]
-            total_segments = len(self.segment_urls)
+            self.total_segments = len(self.segment_urls)
 
-            if total_segments == 0:
-                self.done_callback(self.name, False, "No segments found")
+            if self.total_segments == 0:
+                self._safe_done_callback(False, "No segments found.")
                 return
 
-            self.total_mb = total_segments * 0.4
             self.start_time = time.time()
+            self.segment_dir = os.path.join(self.output_dir, f"{self.name}_segments")
+            os.makedirs(self.segment_dir, exist_ok=True)
 
             q = Queue()
             for i, url in enumerate(self.segment_urls):
@@ -64,63 +77,99 @@ class DownloadWorker(threading.Thread):
                 t.join()
 
             if self._cancelled:
-                self.done_callback(self.name, False, "Download Cancelled")
+                self._cleanup_temp()
+                self._safe_done_callback(False, "Download cancelled.")
                 return
 
-            # Ensure all segments are downloaded
-            missing = [i for i in range(len(self.segment_urls)) if i not in self.segment_data]
-            if missing:
-                self.done_callback(self.name, False, f"Missing segments: {missing}")
-                return
+            # Generate segments.txt
+            list_path = os.path.join(self.segment_dir, "segments.txt")
+            with open(list_path, "w") as f:
+                for i in range(self.total_segments):
+                    segment_path = os.path.join(self.segment_dir, f"{i:05}.ts").replace("\\", "/")
+                    f.write(f"file '{segment_path}'\n")
 
             output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
-            with open(output_path, "wb") as f:
-                for i in range(len(self.segment_urls)):
-                    f.write(self.segment_data[i])
+            ffmpeg_path = get_ffmpeg_path()
 
-            self.done_callback(self.name, True, "Download Complete")
+            if not os.path.exists(ffmpeg_path):
+                self._safe_done_callback(False, f"FFmpeg not found at: {ffmpeg_path}")
+                return
+
+            ffmpeg_cmd = [
+                ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
+                "-i", list_path, "-c", "copy", output_path
+            ]
+
+            logging.info("Running FFmpeg command: %s", ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in ffmpeg_cmd))
+
+            result = subprocess.run(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if result.returncode != 0:
+                logging.error("FFmpeg error:\n%s", result.stderr)
+                self._safe_done_callback(False, f"FFmpeg error:\n{result.stderr.strip()}")
+                return
+
+            self._cleanup_temp()
+            self._safe_done_callback(True, "Download complete.")
 
         except Exception as e:
-            print(f"[{self.name}] Error: {e}")
-            self.done_callback(self.name, False, str(e))
+            logging.exception(f"[{self.name}] Unexpected error:")
+            self._cleanup_temp()
+            self._safe_done_callback(False, f"Error: {str(e)}")
 
     def worker(self, q):
         while not q.empty() and not self._cancelled:
             self._pause_event.wait()
             try:
                 index, url = q.get_nowait()
-            except:
+            except Exception:
                 break
 
             retries = 0
-            while retries <= self.max_retries:
+            while retries <= self.max_retries and not self._cancelled:
                 self._pause_event.wait()
                 try:
-                    response = requests.get(url, timeout=10, stream=True)
-                    content = response.content
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        segment_path = os.path.join(self.segment_dir, f"{index:05}.ts")
+                        with open(segment_path, "wb") as f:
+                            f.write(response.content)
 
-                    with self.lock:
-                        self.segment_data[index] = content
-                        self.downloaded_bytes += len(content)
+                        segment_size = len(response.content)
 
-                        percent = (len(self.segment_data) / len(self.segment_urls)) * 100
-                        elapsed = time.time() - self.start_time + 0.01
-                        speed = self.downloaded_bytes / elapsed / (1024 * 1024)
+                        with self.lock:
+                            self.downloaded_segments += 1
+                            self.downloaded_bytes += segment_size
 
-                        self.progress_callback(
-                            self.name,
-                            percent,
-                            self.downloaded_bytes / (1024 * 1024),
-                            self.total_mb,
-                            speed
-                        )
-                    break
+                            percent = (self.downloaded_segments / self.total_segments) * 100
+                            elapsed = time.time() - self.start_time + 0.01
+                            speed = self.downloaded_bytes / elapsed / (1024 * 1024)
+
+                            estimated_total_mb = (
+                                (self.downloaded_bytes / self.downloaded_segments * self.total_segments)
+                                / (1024 * 1024)
+                            )
+
+                            self.progress_callback(
+                                self.name,
+                                percent,
+                                self.downloaded_bytes / (1024 * 1024),
+                                estimated_total_mb,
+                                speed
+                            )
+                        break
+                    else:
+                        raise Exception(f"HTTP {response.status_code}")
                 except Exception as e:
                     retries += 1
-                    if retries > self.max_retries:
-                        print(f"[{self.name}] Failed segment {index}: {e}")
-                finally:
-                    q.task_done()
+                    wait_time = 0.5 * retries
+                    logging.warning(f"[{self.name}] Segment {index} retry {retries}: {e}")
+                    time.sleep(wait_time)
 
     def pause(self):
         self._pause_event.clear()
@@ -131,3 +180,17 @@ class DownloadWorker(threading.Thread):
     def cancel(self):
         self._cancelled = True
         self._pause_event.set()
+
+    def _cleanup_temp(self):
+        if self.segment_dir and os.path.exists(self.segment_dir):
+            try:
+                shutil.rmtree(self.segment_dir)
+                logging.info(f"[{self.name}] Temp folder cleaned.")
+            except Exception as e:
+                logging.error(f"[{self.name}] Cleanup error: {e}")
+
+    def _safe_done_callback(self, success, message):
+        try:
+            self.done_callback(self.name, success, message)
+        except Exception as e:
+            logging.error(f"[{self.name}] Done callback error: {e}")

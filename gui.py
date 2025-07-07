@@ -1,8 +1,6 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from download_worker import DownloadWorker
-from tkinterdnd2 import DND_FILES, TkinterDnD
-
 import os
 import uuid
 import webbrowser
@@ -11,10 +9,7 @@ class M3U8DownloaderGUI:
     def __init__(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        
-        self.app = TkinterDnD.Tk()  # Drag & drop support
-        ctk.set_appearance_mode("dark")
-
+        self.app = ctk.CTk()
         self.app.geometry("920x680")
         self.app.title("🎬 M3U8 Batch Video Downloader")
 
@@ -66,45 +61,11 @@ class M3U8DownloaderGUI:
         self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
         self.name_entry.pack(pady=(0, 10))
 
-                # --- M3U8 URL Entry ---
-        self.url_entry.drop_target_register(DND_FILES)
-        self.url_entry.dnd_bind("<<Drop>>", self.handle_url_drop)
-        
-        # --- Custom File Name Entry ---
-        self.name_entry.drop_target_register(DND_FILES)
-        self.name_entry.dnd_bind("<<Drop>>", self.handle_name_drop)
-        
-        # --- Folder Entry ---
-        self.folder_entry.drop_target_register(DND_FILES)
-        self.folder_entry.dnd_bind("<<Drop>>", self.handle_folder_drop)
-
         self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
 
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
-
-
-    def handle_url_drop(self, event):
-        dropped = event.data.strip().strip('{}')
-        if dropped.lower().endswith(".m3u8") or dropped.startswith("http"):
-            self.url_entry.delete(0, ctk.END)
-            self.url_entry.insert(0, dropped)
-    
-    def handle_name_drop(self, event):
-        dropped = os.path.basename(event.data.strip().strip('{}'))
-        name, _ = os.path.splitext(dropped)
-        self.name_entry.delete(0, ctk.END)
-        self.name_entry.insert(0, name)
-    
-    def handle_folder_drop(self, event):
-        folder = event.data.strip().strip('{}')
-        if os.path.isdir(folder):
-            self.output_dir = folder
-            self.folder_entry.configure(text_color="lightgreen")
-            self.folder_entry.delete(0, ctk.END)
-            self.folder_entry.insert(0, folder)
-    
 
     def clear_placeholder(self, event=None):
         if self.folder_entry.get() == "No folder selected":
@@ -145,11 +106,22 @@ class M3U8DownloaderGUI:
             messagebox.showwarning("Folder Required", "Please select or enter a valid folder before starting download.")
             return
 
+        if not os.access(self.output_dir, os.W_OK):
+            messagebox.showerror("Permission Denied", "Selected folder is not writable.")
+            return
+
         self.url_entry.delete(0, ctk.END)
         self.name_entry.delete(0, ctk.END)
 
         short_name = custom_name if custom_name else str(uuid.uuid4())[:8]
         file_name = short_name + ".mp4"
+
+        i = 1
+        base_name = short_name
+        while os.path.exists(os.path.join(self.output_dir, file_name)):
+            short_name = f"{base_name}_{i}"
+            file_name = short_name + ".mp4"
+            i += 1
 
         frame = ctk.CTkFrame(self.scrollable_frame)
         frame.pack(padx=10, pady=5, fill="x")
@@ -186,7 +158,7 @@ class M3U8DownloaderGUI:
             "frame": frame,
             "paused": False,
             "custom_name": short_name,
-            "file_name": file_name  # ✅ Required to avoid KeyError
+            "file_name": file_name
         }
 
         pause_btn.configure(command=lambda: self.toggle_pause(short_name))
@@ -235,22 +207,44 @@ class M3U8DownloaderGUI:
         )
 
     def download_done(self, name, success, message):
+        self.app.after(0, lambda: self._handle_done(name, success, message))
+
+    def _handle_done(self, name, success, message):
         d = self.downloads[name]
         d["pause_btn"].configure(state="disabled")
         d["cancel_btn"].configure(state="disabled")
 
         if success:
             d["status"].configure(text=f"✅ {message}", text_color="lightgreen")
-            output_path = os.path.join(self.output_dir, d.get("file_name", name + ".mp4"))  # ✅ No crash
+            output_path = os.path.join(self.output_dir, d.get("file_name", name + ".mp4"))
             d["file_label"].configure(text=output_path, text_color="#00C0FF")
             d["file_label"].bind("<Button-1>", lambda e, path=output_path: webbrowser.open(f'file:///{path}'))
         else:
             d["status"].configure(text=f"❌ {message}", text_color="red")
+            retry_btn = ctk.CTkButton(d["frame"], text="🔁 Retry", width=100)
+            retry_btn.pack(pady=(0, 5), padx=10, anchor="w")
+            retry_btn.configure(command=lambda: self.retry_download(name))
+            if "ffmpeg not found" in message.lower():
+                messagebox.showerror("FFmpeg Not Found", message)
 
         if not d.get("paused"):
             self.active_downloads -= 1
 
         self.try_start_next()
+
+    def retry_download(self, name):
+        d = self.downloads.get(name)
+        if not d:
+            return
+        d["frame"].destroy()
+        self.downloads.pop(name, None)
+        url = d["url"]
+        custom_name = d["custom_name"]
+        self.url_entry.delete(0, ctk.END)
+        self.name_entry.delete(0, ctk.END)
+        self.url_entry.insert(0, url)
+        self.name_entry.insert(0, custom_name)
+        self.start_download()
 
     def toggle_pause(self, name):
         d = self.downloads[name]
