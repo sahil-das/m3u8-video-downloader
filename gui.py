@@ -138,7 +138,7 @@ class M3U8DownloaderGUI:
     def update_progress(self, name, percent, downloaded_mb, total_mb, speed):
         d = self.downloads[name]
         d["progress"].set(percent / 100)
-        d["status"].configure(text=f"{percent:.2f}% | {downloaded_mb:.2f}MB")
+        d["status"].configure(text=f"{percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB @ {speed:.2f} MB/s")
 
     def download_done(self, name, success, message):
         d = self.downloads[name]
