@@ -10,7 +10,7 @@ class M3U8DownloaderGUI:
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.app = ctk.CTk()
-        self.app.geometry("900x650")
+        self.app.geometry("900x680")
         self.app.title("🎬 M3U8 Batch Video Downloader")
 
         self.output_dir = None
@@ -37,8 +37,11 @@ class M3U8DownloaderGUI:
         self.parallel_dropdown.set("3")
         self.parallel_dropdown.grid(row=0, column=2, padx=10)
 
-        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL and press 'Start Download'", width=700)
+        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
         self.url_entry.pack(pady=10)
+
+        self.filename_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=400)
+        self.filename_entry.pack(pady=5)
 
         self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
@@ -61,11 +64,14 @@ class M3U8DownloaderGUI:
             return
 
         url = self.url_entry.get().strip()
+        filename = self.filename_entry.get().strip()
         if not url:
             return
 
         self.url_entry.delete(0, ctk.END)
-        name = str(uuid.uuid4())[:8]
+        self.filename_entry.delete(0, ctk.END)
+
+        name = filename if filename else str(uuid.uuid4())[:8]
 
         frame = ctk.CTkFrame(self.scrollable_frame)
         frame.pack(padx=10, pady=5, fill="x")
@@ -77,7 +83,7 @@ class M3U8DownloaderGUI:
         progress.set(0)
         progress.pack(fill="x", padx=10, pady=5)
 
-        status = ctk.CTkLabel(frame, text="⏳ Waiting...")
+        status = ctk.CTkLabel(frame, text="⏳ Waiting...", text_color="orange")
         status.pack(anchor="w", padx=10)
 
         btn_row = ctk.CTkFrame(frame)
@@ -99,7 +105,8 @@ class M3U8DownloaderGUI:
             "cancel_btn": cancel_btn,
             "file_label": file_label,
             "frame": frame,
-            "paused": False
+            "paused": False,
+            "custom_name": name
         }
 
         pause_btn.configure(command=lambda: self.toggle_pause(name))
@@ -115,7 +122,7 @@ class M3U8DownloaderGUI:
             if d["paused"]:
                 d["worker"].resume()
                 d["pause_btn"].configure(text="Pause")
-                d["status"].configure(text="▶️ Resumed")
+                d["status"].configure(text="▶️ Resumed", text_color="lightblue")
                 d["paused"] = False
                 self.active_downloads += 1
 
@@ -125,8 +132,9 @@ class M3U8DownloaderGUI:
 
     def start_worker(self, name, url):
         self.active_downloads += 1
+        file_name = self.downloads[name]["custom_name"]
         worker = DownloadWorker(
-            name=name,
+            name=file_name,
             url=url,
             output_dir=self.output_dir,
             progress_callback=self.update_progress,
@@ -138,7 +146,10 @@ class M3U8DownloaderGUI:
     def update_progress(self, name, percent, downloaded_mb, total_mb, speed):
         d = self.downloads[name]
         d["progress"].set(percent / 100)
-        d["status"].configure(text=f"{percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB @ {speed:.2f} MB/s")
+        d["status"].configure(
+            text=f"{percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB @ {speed:.2f} MB/s",
+            text_color="white"
+        )
 
     def download_done(self, name, success, message):
         d = self.downloads[name]
@@ -165,17 +176,17 @@ class M3U8DownloaderGUI:
             if self.active_downloads < self.max_parallel:
                 d["worker"].resume()
                 d["pause_btn"].configure(text="Pause")
-                d["status"].configure(text="▶️ Resumed")
+                d["status"].configure(text="▶️ Resumed", text_color="lightblue")
                 d["paused"] = False
                 self.active_downloads += 1
             else:
-                d["status"].configure(text="⏳ Waiting to resume...")
+                d["status"].configure(text="⏳ Waiting to resume...", text_color="orange")
                 if name not in self.resume_queue:
                     self.resume_queue.append(name)
         else:
             d["worker"].pause()
             d["pause_btn"].configure(text="Resume")
-            d["status"].configure(text="⏸️ Paused")
+            d["status"].configure(text="⏸️ Paused", text_color="yellow")
             d["paused"] = True
             self.active_downloads -= 1
             self.try_start_next()
@@ -194,6 +205,7 @@ class M3U8DownloaderGUI:
 
     def run(self):
         self.app.mainloop()
+
 
 if __name__ == "__main__":
     M3U8DownloaderGUI().run()
