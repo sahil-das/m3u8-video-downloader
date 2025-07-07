@@ -279,7 +279,7 @@ class M3U8DownloaderGUI:
                 d["status"].configure(text="⏳ Waiting to resume...", text_color="orange")
                 if name not in self.resume_queue:
                     self.resume_queue.append(name)
-        else:
+        else: 
             d["worker"].pause()
             d["pause_btn"].configure(text="Resume")
             d["status"].configure(text="⏸️ Paused", text_color="orange")

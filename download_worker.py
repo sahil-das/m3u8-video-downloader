@@ -196,4 +196,4 @@ class DownloadWorker(threading.Thread):
         try:
             self.done_callback(self.name, success, message)
         except Exception as e:
-            logging.error(f"[{self.name}] Done callback error: {e}")
+            logging.error(f"[{self.name}] Done callback error: {e}") 
