@@ -111,13 +111,14 @@ class M3U8DownloaderGUI:
         self.try_start_next()
 
     def try_start_next(self):
-        running_now = sum(1 for d in self.downloads.values()
-                          if d.get("running") and not d.get("paused", False))
-        self.active_downloads = running_now
-
+        running = sum(1 for d in self.downloads.values()
+                      if "worker" in d and d["worker"].is_alive() and not d.get("paused", False))
+        self.active_downloads = running
+    
         while self.active_downloads < self.max_parallel and self.queue:
             name, url = self.queue.pop(0)
             self.start_worker(name, url)
+
 
     def start_worker(self, name, url):
         self.active_downloads += 1
@@ -157,14 +158,26 @@ class M3U8DownloaderGUI:
 
     def toggle_pause(self, name):
         d = self.downloads[name]
-
-        if not d.get("running") and d["paused"]:
-            d["status"].configure(text="⏳ Waiting...")
-            self.queue.append((name, d["url"]))
-            d["paused"] = False
+        if d["paused"]:
+            # Try to resume only if under max_parallel
+            running = sum(1 for d in self.downloads.values()
+                          if "worker" in d and d["worker"].is_alive() and not d["paused"])
+            if running >= self.max_parallel:
+                d["status"].configure(text="⏸️ Waiting to resume...", text_color="orange")
+                return  # Don't resume now
+            d["worker"].resume()
             d["pause_btn"].configure(text="Pause")
+            d["status"].configure(text="▶️ Resumed...")
+            d["paused"] = False
+            self.active_downloads += 1
+        else:
+            d["worker"].pause()
+            d["pause_btn"].configure(text="Resume")
+            d["status"].configure(text="⏸️ Paused")
+            d["paused"] = True
+            self.active_downloads -= 1
             self.try_start_next()
-            return
+    
 
         if d["paused"]:
             d["paused"] = False
