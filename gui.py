@@ -4,57 +4,64 @@ from download_worker import DownloadWorker
 import os
 import uuid
 import webbrowser
-import threading
+
 
 class M3U8DownloaderGUI:
     def __init__(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.app = ctk.CTk()
-        self.app.geometry("800x700")
-        self.app.title("M3U8 Batch Downloader")
+        self.app.geometry("900x650")
+        self.app.title("🎬 M3U8 Batch Video Downloader")
 
         self.output_dir = None
         self.downloads = {}
         self.active_downloads = 0
-        self.download_queue = []
-        self.max_active_downloads = 5
+        self.queue = []
+        self.max_parallel = 3
 
-        self.folder_button = ctk.CTkButton(self.app, text="Select Download Folder", command=self.select_folder)
-        self.folder_button.pack(pady=5)
+        # ========== HEADER ==========
+        header = ctk.CTkLabel(self.app, text="📥 M3U8 Batch Video Downloader", font=ctk.CTkFont(size=20, weight="bold"))
+        header.pack(pady=10)
 
-        self.folder_label = ctk.CTkLabel(self.app, text="No folder selected", text_color="gray")
-        self.folder_label.pack()
+        # ========== CONTROL PANEL ==========
+        control_frame = ctk.CTkFrame(self.app)
+        control_frame.pack(pady=5)
 
-        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=600)
-        self.url_entry.pack(pady=5)
+        self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder)
+        self.folder_button.grid(row=0, column=0, padx=10, pady=10)
 
-        self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Rename file (without extension)", width=400)
-        self.name_entry.pack(pady=5)
+        self.folder_label = ctk.CTkLabel(control_frame, text="No folder selected", text_color="gray", anchor="w", width=500)
+        self.folder_label.grid(row=0, column=1, padx=10)
 
-        self.start_button = ctk.CTkButton(self.app, text="Start Download", command=self.start_download)
-        self.start_button.pack(pady=5)
+        self.parallel_dropdown = ctk.CTkOptionMenu(control_frame, values=[str(i) for i in range(1, 11)],
+                                                   command=self.set_parallel, width=100)
+        self.parallel_dropdown.set("3")
+        self.parallel_dropdown.grid(row=0, column=2, padx=10)
 
-        self.limit_dropdown = ctk.CTkOptionMenu(self.app, values=[str(i) for i in range(1, 11)], command=self.set_max_downloads)
-        self.limit_dropdown.set(str(self.max_active_downloads))
-        self.limit_dropdown.pack(pady=5)
+        # ========== URL ENTRY ==========
+        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL and press 'Start Download'", width=700)
+        self.url_entry.pack(pady=10)
 
-        self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=750, height=480)
+        self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
+        self.download_button.pack(pady=5)
+
+        # ========== SCROLLABLE DOWNLOADS ==========
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=850, height=440)
         self.scrollable_frame.pack(pady=10)
+
+    def set_parallel(self, value):
+        self.max_parallel = int(value)
 
     def select_folder(self):
         folder = filedialog.askdirectory()
         if folder:
             self.output_dir = folder
-            self.folder_label.configure(text=f"Download to: {folder}", text_color="lightgreen")
-
-    def set_max_downloads(self, value):
-        self.max_active_downloads = int(value)
-        self.try_start_queued_downloads()
+            self.folder_label.configure(text=folder, text_color="lightgreen")
 
     def start_download(self):
         if not self.output_dir:
-            messagebox.showwarning("Select Folder", "Please select a download folder first.")
+            messagebox.showwarning("Folder Required", "Please select a folder before starting download.")
             return
 
         url = self.url_entry.get().strip()
@@ -62,33 +69,62 @@ class M3U8DownloaderGUI:
             return
 
         self.url_entry.delete(0, ctk.END)
-        rename = self.name_entry.get().strip()
-        self.name_entry.delete(0, ctk.END)
+        name = str(uuid.uuid4())[:8]
 
-        name = rename if rename else str(uuid.uuid4())[:8]
+        # UI setup
+        frame = ctk.CTkFrame(self.scrollable_frame)
+        frame.pack(padx=10, pady=5, fill="x")
 
-        label = ctk.CTkLabel(self.scrollable_frame, text=f"{url[:60]}...", wraplength=700)
-        label.pack(anchor="w", padx=10, pady=2)
+        title = ctk.CTkLabel(frame, text=url[:80] + "...", anchor="w")
+        title.pack(anchor="w", padx=10, pady=(5, 0))
 
-        progress = ctk.CTkProgressBar(self.scrollable_frame, width=700)
+        progress = ctk.CTkProgressBar(frame)
         progress.set(0)
-        progress.pack(padx=10, pady=2)
+        progress.pack(fill="x", padx=10, pady=5)
 
-        status = ctk.CTkLabel(self.scrollable_frame, text="Queued...")
+        status = ctk.CTkLabel(frame, text="⏳ Waiting...")
         status.pack(anchor="w", padx=10)
 
-        btn_frame = ctk.CTkFrame(self.scrollable_frame)
-        btn_frame.pack(pady=2)
+        # Button row
+        btn_row = ctk.CTkFrame(frame)
+        btn_row.pack(anchor="w", padx=10, pady=5)
 
-        pause_btn = ctk.CTkButton(btn_frame, text="Pause")
-        cancel_btn = ctk.CTkButton(btn_frame, text="Cancel")
-
+        pause_btn = ctk.CTkButton(btn_row, text="Pause", width=80)
+        cancel_btn = ctk.CTkButton(btn_row, text="Cancel", width=80)
         pause_btn.grid(row=0, column=0, padx=5)
         cancel_btn.grid(row=0, column=1, padx=5)
 
-        path_label = ctk.CTkLabel(self.scrollable_frame, text="", text_color="#00ffff", cursor="hand2")
-        path_label.pack(anchor="w", padx=10)
+        file_label = ctk.CTkLabel(frame, text="", text_color="gray")
+        file_label.pack(anchor="w", padx=10, pady=(0, 5))
 
+        self.downloads[name] = {
+            "url": url,
+            "progress": progress,
+            "status": status,
+            "pause_btn": pause_btn,
+            "cancel_btn": cancel_btn,
+            "file_label": file_label,
+            "frame": frame,
+            "paused": False
+        }
+
+        pause_btn.configure(command=lambda: self.toggle_pause(name))
+        cancel_btn.configure(command=lambda: self.cancel_download(name))
+
+        self.queue.append((name, url))
+        self.try_start_next()
+
+    def try_start_next(self):
+        running = sum(1 for d in self.downloads.values()
+                      if "worker" in d and d["worker"].is_alive() and not d.get("paused", False))
+        self.active_downloads = running
+
+        while self.active_downloads < self.max_parallel and self.queue:
+            name, url = self.queue.pop(0)
+            self.start_worker(name, url)
+
+    def start_worker(self, name, url):
+        self.active_downloads += 1
         worker = DownloadWorker(
             name=name,
             url=url,
@@ -96,85 +132,65 @@ class M3U8DownloaderGUI:
             progress_callback=self.update_progress,
             done_callback=self.download_done
         )
+        self.downloads[name]["worker"] = worker
+        self.downloads[name]["status"].configure(text="⏬ Downloading...")
+        worker.start()
 
-        self.downloads[name] = {
-            "worker": worker,
-            "progress": progress,
-            "status": status,
-            "pause_btn": pause_btn,
-            "cancel_btn": cancel_btn,
-            "label": label,
-            "paused": False,
-            "path": os.path.join(self.output_dir, f"{name}.mp4"),
-            "path_label": path_label
-        }
+    def update_progress(self, name, percent, downloaded_mb, total_mb, speed):
+        d = self.downloads[name]
+        d["progress"].set(percent / 100)
+        d["status"].configure(text=f"{percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB @ {speed:.2f} MB/s")
 
-        pause_btn.configure(command=lambda: self.toggle_pause(name))
-        cancel_btn.configure(command=lambda: self.cancel_download(name))
-        path_label.bind("<Button-1>", lambda e, n=name: self.open_file_folder(n))
+    def download_done(self, name, success, message):
+        d = self.downloads[name]
+        d["pause_btn"].configure(state="disabled")
+        d["cancel_btn"].configure(state="disabled")
 
-        self.download_queue.append(name)
-        self.try_start_queued_downloads()
+        if success:
+            d["status"].configure(text=f"✅ {message}", text_color="lightgreen")
+            output_path = os.path.join(self.output_dir, f"{name}.mp4")
+            d["file_label"].configure(text=f"📁 Saved as: {output_path}", text_color="#00C0FF")
+            d["file_label"].bind("<Button-1>", lambda e, path=output_path: webbrowser.open(f'file:///{path}'))
+        else:
+            d["status"].configure(text=f"❌ {message}", text_color="red")
 
-    def try_start_queued_downloads(self):
-        while self.download_queue and self.active_downloads < self.max_active_downloads:
-            name = self.download_queue.pop(0)
-            worker = self.downloads[name]["worker"]
-            self.downloads[name]["status"].configure(text="Downloading...")
-            worker.start()
-            self.active_downloads += 1
+        self.active_downloads -= 1
+        self.try_start_next()
 
     def toggle_pause(self, name):
         d = self.downloads[name]
         if d["paused"]:
-            d["worker"].resume()
-            d["pause_btn"].configure(text="Pause")
             d["paused"] = False
-            self.try_start_queued_downloads()
+            d["pause_btn"].configure(text="Pause")
+
+            # Check if we can resume now, or queue it
+            running = sum(1 for dl in self.downloads.values()
+                          if "worker" in dl and dl["worker"].is_alive() and not dl.get("paused", False))
+
+            if running >= self.max_parallel:
+                d["status"].configure(text="⏳ Waiting...")
+                self.queue.append((name, d["url"]))
+            else:
+                self.start_worker(name, d["url"])
+
         else:
-            d["worker"].pause()
-            d["pause_btn"].configure(text="Resume")
             d["paused"] = True
-            d["status"].configure(text="Paused")
+            d["pause_btn"].configure(text="Resume")
+            if "worker" in d:
+                d["worker"].pause()
+            d["status"].configure(text="⏸️ Paused", text_color="orange")
             self.active_downloads -= 1
-            self.try_start_queued_downloads()
+            self.try_start_next()
 
     def cancel_download(self, name):
         d = self.downloads[name]
-        d["worker"].cancel()
-        d["status"].configure(text="❌ Cancelled")
+        if "worker" in d:
+            d["worker"].cancel()
+        d["status"].configure(text="❌ Cancelled", text_color="red")
         d["pause_btn"].configure(state="disabled")
         d["cancel_btn"].configure(state="disabled")
         self.active_downloads -= 1
-        self.try_start_queued_downloads()
-
-    def update_progress(self, name, percent, downloaded_mb, total_mb, speed):
-        d = self.downloads.get(name)
-        if d:
-            d["progress"].set(percent / 100)
-            d["status"].configure(
-                text=f"{percent:.2f}% | {downloaded_mb:.2f}MB / {total_mb:.2f}MB | {speed:.2f}MB/s"
-            )
-
-    def download_done(self, name, success, msg):
-        d = self.downloads.get(name)
-        if d:
-            d["status"].configure(text=f"{'✅' if success else '❌'} {msg}")
-            d["pause_btn"].configure(state="disabled")
-            d["cancel_btn"].configure(state="disabled")
-
-            if success:
-                path = d["path"]
-                d["path_label"].configure(text=path)
-            self.active_downloads -= 1
-            self.try_start_queued_downloads()
-
-    def open_file_folder(self, name):
-        d = self.downloads[name]
-        path = d["path"]
-        if os.path.exists(path):
-            folder = os.path.dirname(path)
-            webbrowser.open(folder)
+        self.try_start_next()
 
     def run(self):
         self.app.mainloop()
