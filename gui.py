@@ -1,20 +1,16 @@
+from tkinterdnd2 import DND_FILES, TkinterDnD
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from download_worker import DownloadWorker
-from tkinterdnd2 import DND_FILES, TkinterDnD
-
 import os
 import uuid
 import webbrowser
 
 class M3U8DownloaderGUI:
     def __init__(self):
+        self.app = TkinterDnD.Tk()  # ✅ Drag-and-drop enabled window
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        
-        self.app = TkinterDnD.Tk()  # Drag & drop support
-        ctk.set_appearance_mode("dark")
-
         self.app.geometry("920x680")
         self.app.title("🎬 M3U8 Batch Video Downloader")
 
@@ -42,6 +38,10 @@ class M3U8DownloaderGUI:
         self.folder_entry.bind("<FocusIn>", self.clear_placeholder)
         self.folder_entry.bind("<FocusOut>", self.restore_placeholder)
 
+        # ✅ Drag and drop for folder field
+        self.folder_entry.drop_target_register(DND_FILES)
+        self.folder_entry.dnd_bind("<<Drop>>", self.handle_folder_drop)
+
         self.parallel_label = ctk.CTkLabel(control_frame, text="Maximum Parallel Downloads")
         self.parallel_label.grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
 
@@ -63,48 +63,22 @@ class M3U8DownloaderGUI:
         self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
         self.url_entry.pack(pady=(15, 5))
 
+        # ✅ Drag and drop for URL
+        self.url_entry.drop_target_register(DND_FILES)
+        self.url_entry.dnd_bind("<<Drop>>", self.handle_url_drop)
+
         self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
         self.name_entry.pack(pady=(0, 10))
 
-                # --- M3U8 URL Entry ---
-        self.url_entry.drop_target_register(DND_FILES)
-        self.url_entry.dnd_bind("<<Drop>>", self.handle_url_drop)
-        
-        # --- Custom File Name Entry ---
+        # ✅ Drag and drop for custom filename
         self.name_entry.drop_target_register(DND_FILES)
         self.name_entry.dnd_bind("<<Drop>>", self.handle_name_drop)
-        
-        # --- Folder Entry ---
-        self.folder_entry.drop_target_register(DND_FILES)
-        self.folder_entry.dnd_bind("<<Drop>>", self.handle_folder_drop)
 
         self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
 
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
-
-
-    def handle_url_drop(self, event):
-        dropped = event.data.strip().strip('{}')
-        if dropped.lower().endswith(".m3u8") or dropped.startswith("http"):
-            self.url_entry.delete(0, ctk.END)
-            self.url_entry.insert(0, dropped)
-    
-    def handle_name_drop(self, event):
-        dropped = os.path.basename(event.data.strip().strip('{}'))
-        name, _ = os.path.splitext(dropped)
-        self.name_entry.delete(0, ctk.END)
-        self.name_entry.insert(0, name)
-    
-    def handle_folder_drop(self, event):
-        folder = event.data.strip().strip('{}')
-        if os.path.isdir(folder):
-            self.output_dir = folder
-            self.folder_entry.configure(text_color="lightgreen")
-            self.folder_entry.delete(0, ctk.END)
-            self.folder_entry.insert(0, folder)
-    
 
     def clear_placeholder(self, event=None):
         if self.folder_entry.get() == "No folder selected":
@@ -186,14 +160,11 @@ class M3U8DownloaderGUI:
             "frame": frame,
             "paused": False,
             "custom_name": short_name,
-            "file_name": file_name  # ✅ Required to avoid KeyError
+            "file_name": file_name
         }
 
         pause_btn.configure(command=lambda: self.toggle_pause(short_name))
         cancel_btn.configure(command=lambda: self.cancel_download(short_name))
-
-        self.download_button.configure(state="disabled")
-        self.app.after(500, lambda: self.download_button.configure(state="normal"))
 
         self.queue.append((short_name, url))
         self.try_start_next()
@@ -241,7 +212,7 @@ class M3U8DownloaderGUI:
 
         if success:
             d["status"].configure(text=f"✅ {message}", text_color="lightgreen")
-            output_path = os.path.join(self.output_dir, d.get("file_name", name + ".mp4"))  # ✅ No crash
+            output_path = os.path.join(self.output_dir, d.get("file_name", name + ".mp4"))
             d["file_label"].configure(text=output_path, text_color="#00C0FF")
             d["file_label"].bind("<Button-1>", lambda e, path=output_path: webbrowser.open(f'file:///{path}'))
         else:
@@ -268,7 +239,6 @@ class M3U8DownloaderGUI:
                 d["status"].configure(text="⏳ Waiting to resume...", text_color="orange")
                 if name not in self.resume_queue:
                     self.resume_queue.append(name)
-                self.try_start_next()
         else:
             d["worker"].pause()
             d["pause_btn"].configure(text="Resume")
@@ -289,6 +259,27 @@ class M3U8DownloaderGUI:
         if name in self.resume_queue:
             self.resume_queue.remove(name)
         self.try_start_next()
+
+    # ✅ Drag and drop handlers
+    def handle_url_drop(self, event):
+        dropped = event.data.strip().strip("{}")
+        if dropped.lower().endswith(".m3u8") or dropped.startswith("http"):
+            self.url_entry.delete(0, ctk.END)
+            self.url_entry.insert(0, dropped)
+
+    def handle_name_drop(self, event):
+        dropped = os.path.basename(event.data.strip().strip("{}"))
+        name, _ = os.path.splitext(dropped)
+        self.name_entry.delete(0, ctk.END)
+        self.name_entry.insert(0, name)
+
+    def handle_folder_drop(self, event):
+        folder = event.data.strip().strip("{}")
+        if os.path.isdir(folder):
+            self.output_dir = folder
+            self.folder_entry.configure(text_color="lightgreen")
+            self.folder_entry.delete(0, ctk.END)
+            self.folder_entry.insert(0, folder)
 
     def run(self):
         self.app.mainloop()
