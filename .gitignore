@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller build folders
+build/
+dist/
+*.spec
+
+# Virtual environment
+venv/
+.env/
+.venv/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Cache
+.cache/
+*.bak
+
+# VS Code settings
+.vscode/
+
+# Local ffmpeg.exe (if it's bundled manually)
+ffmpeg.exe
+
+# Segments and temporary folders
+*_segments/
+segments.txt
+
+# IDE specific
+.idea/
+*.iml
+
+# OneDrive sync conflict files
+*.tmp.driveupload
