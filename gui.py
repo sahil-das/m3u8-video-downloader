@@ -1,30 +1,17 @@
-import ctypes
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from download_worker import DownloadWorker
 import os
 import uuid
 import webbrowser
-import tkinterdnd2
-import tkinter as tk  # ⬅ Native Tkinter for Entry widgets
 
-# 🛠 Fix blurry UI on high-DPI displays
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
-except:
-    pass
-
-class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
+class M3U8DownloaderGUI:
     def __init__(self):
-        super().__init__()
-
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        ctk.set_widget_scaling(1.1)
-        ctk.set_window_scaling(1.1)
-
-        self.geometry("920x680")
-        self.title("🎬 M3U8 Batch Video Downloader")
+        self.app = ctk.CTk()
+        self.app.geometry("920x680")
+        self.app.title("🎬 M3U8 Batch Video Downloader")
 
         self.output_dir = None
         self.downloads = {}
@@ -34,22 +21,18 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
         self.max_parallel = 3
         self.segment_threads = 8
 
-        self.setup_gui()
-        self.enable_drag_and_drop()
-
-    def setup_gui(self):
-        header = ctk.CTkLabel(self, text="📥 M3U8 Batch Video Downloader", font=ctk.CTkFont(size=20, weight="bold"))
+        header = ctk.CTkLabel(self.app, text="📥 M3U8 Batch Video Downloader", font=ctk.CTkFont(size=20, weight="bold"))
         header.pack(pady=10)
 
-        control_frame = ctk.CTkFrame(self)
+        control_frame = ctk.CTkFrame(self.app)
         control_frame.pack(pady=5, fill="x", padx=10)
 
         self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder, width=150)
         self.folder_button.grid(row=0, column=0, padx=10, pady=(10, 2), sticky="w")
 
-        self.folder_entry = tk.Entry(control_frame, width=70)
+        self.folder_entry = ctk.CTkEntry(control_frame, width=500)
         self.folder_entry.insert(0, "No folder selected")
-        self.folder_entry.configure(fg="gray")
+        self.folder_entry.configure(text_color="gray")
         self.folder_entry.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
         self.folder_entry.bind("<FocusIn>", self.clear_placeholder)
         self.folder_entry.bind("<FocusOut>", self.restore_placeholder)
@@ -72,74 +55,28 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
 
         control_frame.grid_columnconfigure(1, weight=1)
 
-        self.url_entry = tk.Entry(self, width=90)
-        self.url_entry.insert(0, "Enter or drop M3U8 URL")
-        self.url_entry.configure(fg="gray")
+        self.url_entry = ctk.CTkEntry(self.app, placeholder_text="Enter M3U8 URL", width=700)
         self.url_entry.pack(pady=(15, 5))
-        self.url_entry.bind("<FocusIn>", self.clear_url_placeholder)
-        self.url_entry.bind("<FocusOut>", self.restore_url_placeholder)
 
-        self.name_entry = ctk.CTkEntry(self, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
+        self.name_entry = ctk.CTkEntry(self.app, placeholder_text="Optional: Enter custom file name (without .mp4)", width=700)
         self.name_entry.pack(pady=(0, 10))
 
-        self.download_button = ctk.CTkButton(self, text="🚀 Start Download", command=self.start_download)
+        self.download_button = ctk.CTkButton(self.app, text="🚀 Start Download", command=self.start_download)
         self.download_button.pack(pady=5)
 
-        self.scrollable_frame = ctk.CTkScrollableFrame(self, width=870, height=450)
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
-
-    def enable_drag_and_drop(self):
-        for entry, drop_handler, drop_type in [
-            (self.url_entry, self.drop_url, "DND_Text"),
-            (self.name_entry, self.drop_name, "DND_Text"),
-            (self.folder_entry, self.drop_folder, "DND_Files")
-        ]:
-            entry.drop_target_register(drop_type)
-            entry.dnd_bind('<<Drop>>', drop_handler)
-
-    def drop_url(self, event):
-        dropped = event.data.strip().strip('{}')
-        if dropped.startswith("http") and ".m3u8" in dropped:
-            self.url_entry.delete(0, tk.END)
-            self.url_entry.insert(0, dropped)
-            self.url_entry.configure(fg="white")
-
-    def drop_name(self, event):
-        dropped = event.data.strip().strip('{}')
-        if dropped.endswith(".mp4"):
-            dropped = dropped[:-4]
-        self.name_entry.delete(0, ctk.END)
-        self.name_entry.insert(0, dropped)
-
-    def drop_folder(self, event):
-        dropped = event.data.strip().strip('{}')
-        if os.path.isdir(dropped):
-            self.output_dir = dropped
-            self.folder_entry.configure(fg="lightgreen")
-            self.folder_entry.delete(0, tk.END)
-            self.folder_entry.insert(0, dropped)
 
     def clear_placeholder(self, event=None):
         if self.folder_entry.get() == "No folder selected":
-            self.folder_entry.delete(0, tk.END)
-            self.folder_entry.configure(fg="white")
+            self.folder_entry.delete(0, ctk.END)
+            self.folder_entry.configure(text_color="white")
 
     def restore_placeholder(self, event=None):
         if not self.folder_entry.get().strip():
             self.folder_entry.insert(0, "No folder selected")
-            self.folder_entry.configure(fg="gray")
+            self.folder_entry.configure(text_color="gray")
 
-    def clear_url_placeholder(self, event=None):
-        if self.url_entry.get() == "Enter or drop M3U8 URL":
-            self.url_entry.delete(0, tk.END)
-            self.url_entry.configure(fg="white")
-
-    def restore_url_placeholder(self, event=None):
-        if not self.url_entry.get().strip():
-            self.url_entry.insert(0, "Enter or drop M3U8 URL")
-            self.url_entry.configure(fg="gray")
-
-    # All remaining methods (start_download, try_start_next, etc.) remain unchanged
     def set_parallel(self, value):
         self.max_parallel = int(value)
 
@@ -166,7 +103,7 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
         if folder_input != "No folder selected" and os.path.isdir(folder_input):
             self.output_dir = folder_input
         if not self.output_dir:
-            messagebox.showwarning("Folder Required", "Please select a valid output folder.")
+            messagebox.showwarning("Folder Required", "Please select or enter a valid folder before starting download.")
             return
 
         self.url_entry.delete(0, ctk.END)
@@ -178,7 +115,8 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
         frame = ctk.CTkFrame(self.scrollable_frame)
         frame.pack(padx=10, pady=5, fill="x")
 
-        title = ctk.CTkLabel(frame, text=custom_name or url[:80] + "...", anchor="w", font=ctk.CTkFont(weight="bold"))
+        title_text = custom_name if custom_name else url[:80] + "..."
+        title = ctk.CTkLabel(frame, text=title_text, anchor="w", font=ctk.CTkFont(weight="bold"))
         title.pack(anchor="w", padx=10, pady=(5, 0))
 
         progress = ctk.CTkProgressBar(frame)
@@ -208,11 +146,15 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
             "file_label": file_label,
             "frame": frame,
             "paused": False,
-            "custom_name": short_name
+            "custom_name": short_name,
+            "file_name": file_name  # ✅ Required to avoid KeyError
         }
 
         pause_btn.configure(command=lambda: self.toggle_pause(short_name))
         cancel_btn.configure(command=lambda: self.cancel_download(short_name))
+
+        self.download_button.configure(state="disabled")
+        self.app.after(500, lambda: self.download_button.configure(state="normal"))
 
         self.queue.append((short_name, url))
         self.try_start_next()
@@ -221,7 +163,7 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
         while self.active_downloads < self.max_parallel and self.resume_queue:
             name = self.resume_queue.pop(0)
             d = self.downloads[name]
-            if d["paused"]:
+            if d["paused"] and "worker" in d:
                 d["worker"].resume()
                 d["pause_btn"].configure(text="Pause")
                 d["status"].configure(text="▶️ Resumed", text_color="skyblue")
@@ -234,7 +176,6 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
 
     def start_worker(self, name, url):
         self.active_downloads += 1
-        file_name = self.downloads[name]["custom_name"] + ".mp4"
         worker = DownloadWorker(
             name=name,
             url=url,
@@ -244,7 +185,6 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
             num_connections=self.segment_threads
         )
         self.downloads[name]["worker"] = worker
-        self.downloads[name]["file_name"] = file_name
         worker.start()
 
     def update_progress(self, name, percent, downloaded_mb, total_mb, speed):
@@ -262,7 +202,7 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
 
         if success:
             d["status"].configure(text=f"✅ {message}", text_color="lightgreen")
-            output_path = os.path.join(self.output_dir, d["file_name"])
+            output_path = os.path.join(self.output_dir, d.get("file_name", name + ".mp4"))  # ✅ No crash
             d["file_label"].configure(text=output_path, text_color="#00C0FF")
             d["file_label"].bind("<Button-1>", lambda e, path=output_path: webbrowser.open(f'file:///{path}'))
         else:
@@ -270,10 +210,14 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
 
         if not d.get("paused"):
             self.active_downloads -= 1
+
         self.try_start_next()
 
     def toggle_pause(self, name):
         d = self.downloads[name]
+        if "worker" not in d:
+            return
+
         if d["paused"]:
             if self.active_downloads < self.max_parallel:
                 d["worker"].resume()
@@ -285,6 +229,7 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
                 d["status"].configure(text="⏳ Waiting to resume...", text_color="orange")
                 if name not in self.resume_queue:
                     self.resume_queue.append(name)
+                self.try_start_next()
         else:
             d["worker"].pause()
             d["pause_btn"].configure(text="Resume")
@@ -295,7 +240,8 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
 
     def cancel_download(self, name):
         d = self.downloads[name]
-        d["worker"].cancel()
+        if "worker" in d:
+            d["worker"].cancel()
         d["status"].configure(text="❌ Cancelled", text_color="red")
         d["pause_btn"].configure(state="disabled")
         d["cancel_btn"].configure(state="disabled")
@@ -306,7 +252,8 @@ class M3U8DownloaderGUI(tkinterdnd2.TkinterDnD.Tk):
         self.try_start_next()
 
     def run(self):
-        self.mainloop()
+        self.app.mainloop()
+
 
 if __name__ == "__main__":
     M3U8DownloaderGUI().run()
