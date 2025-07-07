@@ -96,14 +96,15 @@ class M3U8DownloaderGUI:
 
         btn_row = ctk.CTkFrame(frame)
         btn_row.pack(anchor="w", padx=10, pady=5)
+        
+        file_label = ctk.CTkLabel(frame, text="", text_color="gray")
+        file_label.pack(anchor="w", padx=10, pady=(0, 5))
 
         pause_btn = ctk.CTkButton(btn_row, text="Pause", width=80)
         cancel_btn = ctk.CTkButton(btn_row, text="Cancel", width=80)
         pause_btn.grid(row=0, column=0, padx=5)
         cancel_btn.grid(row=0, column=1, padx=5)
 
-        file_label = ctk.CTkLabel(frame, text="", text_color="gray")
-        file_label.pack(anchor="w", padx=10, pady=(0, 5))
 
         self.downloads[name] = {
             "url": url,
