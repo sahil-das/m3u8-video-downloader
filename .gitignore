@@ -5,7 +5,6 @@ __pycache__/
 
 # PyInstaller build folders
 build/
-dist/
 *.spec
 
 # Virtual environment
