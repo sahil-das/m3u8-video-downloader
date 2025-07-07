@@ -15,7 +15,8 @@ class DownloadWorker(threading.Thread):
         self.progress_callback = progress_callback
         self.done_callback = done_callback
 
-        self.num_connections = num_connections
+        # Sanitize thread count
+        self.num_connections = max(1, min(num_connections, 64))
         self.max_retries = max_retries
 
         self._pause_event = threading.Event()
@@ -56,12 +57,11 @@ class DownloadWorker(threading.Thread):
             for t in threads:
                 t.join()
 
-            # Check for cancellation
             if self._cancelled:
                 self.done_callback(self.name, False, "Download Cancelled")
                 return
 
-            # Save to file
+            # Save all segments to file
             output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
             with open(output_path, "wb") as f:
                 for i in range(len(self.segment_urls)):
@@ -85,7 +85,6 @@ class DownloadWorker(threading.Thread):
             retries = 0
             while retries <= self.max_retries:
                 self._pause_event.wait()
-
                 try:
                     response = requests.get(url, timeout=10, stream=True)
                     content = response.content
@@ -95,6 +94,7 @@ class DownloadWorker(threading.Thread):
                         self.downloaded_bytes += len(content)
                         percent = (len(self.segment_data) / len(self.segment_urls)) * 100
                         speed = self.downloaded_bytes / (time.time() - 1 + 0.01) / (1024 * 1024)
+
                         self.progress_callback(
                             self.name,
                             percent,
