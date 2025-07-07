@@ -1,14 +1,12 @@
+import threading
 import m3u8
 import requests
 import os
 import time
-import threading
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class DownloadWorker(threading.Thread):
-    def __init__(self, name, url, output_dir, progress_callback, done_callback):
+    def __init__(self, name, url, output_dir, progress_callback=None, done_callback=None):
         super().__init__()
         self.name = name
         self.url = url
@@ -17,92 +15,79 @@ class DownloadWorker(threading.Thread):
         self.done_callback = done_callback
 
         self._pause_event = threading.Event()
-        self._pause_event.set()
-        self._cancelled = threading.Event()
-
-        self.segment_data = []
+        self._cancel_event = threading.Event()
 
     def pause(self):
-        self._pause_event.clear()
-
-    def resume(self):
         self._pause_event.set()
 
-    def cancel(self):
-        self._cancelled.set()
+    def resume(self):
+        self._pause_event.clear()
 
-    def _wait_if_paused(self):
-        self._pause_event.wait()
+    def cancel(self):
+        self._cancel_event.set()
 
     def run(self):
         try:
-            m3u8_obj = m3u8.load(self.url)
-            segments = m3u8_obj.segments
+            playlist = m3u8.load(self.url)
+            if not playlist.segments:
+                self.done_callback(self.name, False, "No segments found.")
+                return
+
+            segments = playlist.segments
             total = len(segments)
-
-            if total == 0:
-                raise Exception("No segments found.")
-
-            self.segment_data = [None] * total
-            downloaded = 0
+            output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
             downloaded_bytes = 0
+            segment_files = []
+
             start_time = time.time()
-            session = requests.Session()
 
-            def download_segment(i, segment_url):
-                for attempt in range(3):  # Retry up to 3 times
-                    if self._cancelled.is_set():
-                        return None
-                    self._wait_if_paused()
-                    try:
-                        response = session.get(segment_url, timeout=10)
-                        response.raise_for_status()
-                        return i, response.content
-                    except Exception:
-                        time.sleep(1)
-                raise Exception(f"Failed to download segment {i} after 3 attempts.")
+            for i, segment in enumerate(segments):
+                if self._cancel_event.is_set():
+                    self.done_callback(self.name, False, "Cancelled")
+                    return
 
-            with ThreadPoolExecutor(max_workers=16) as executor:
-                futures = {
-                    executor.submit(download_segment, i, seg.absolute_uri): i
-                    for i, seg in enumerate(segments)
-                }
+                while self._pause_event.is_set():
+                    time.sleep(0.2)
 
-                for future in as_completed(futures):
-                    if self._cancelled.is_set():
-                        raise Exception("Download cancelled by user.")
-                    result = future.result()
-                    if result is None:
-                        continue
-                    i, data = result
-                    self.segment_data[i] = data
-                    downloaded += 1
-                    downloaded_bytes += len(data)
+                uri = segment.uri
+                if not uri.startswith("http"):
+                    base_uri = playlist.base_uri or self.url.rsplit("/", 1)[0] + "/"
+                    uri = base_uri + uri
 
-                    percent = (downloaded / total) * 100
-                    downloaded_mb = downloaded_bytes / (1024 * 1024)
-                    estimated_total_mb = (downloaded_bytes / downloaded) * total / (1024 * 1024)
-                    elapsed = time.time() - start_time
-                    speed = downloaded_bytes / elapsed / (1024 * 1024)
+                r = requests.get(uri, stream=True, timeout=10)
+                r.raise_for_status()
 
-                    self.progress_callback(self.name, percent, downloaded_mb, estimated_total_mb, speed)
+                segment_file = os.path.join(self.output_dir, f"{self.name}_{i}.ts")
+                with open(segment_file, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if self._cancel_event.is_set():
+                            self.done_callback(self.name, False, "Cancelled")
+                            return
+                        if self._pause_event.is_set():
+                            while self._pause_event.is_set():
+                                time.sleep(0.2)
+                        if chunk:
+                            f.write(chunk)
+                            downloaded_bytes += len(chunk)
 
-            ts_file = os.path.join(self.output_dir, f"{self.name}.ts")
-            with open(ts_file, 'wb') as f:
-                for chunk in self.segment_data:
-                    f.write(chunk)
+                segment_files.append(segment_file)
 
-            mp4_file = os.path.join(self.output_dir, f"{self.name}.mp4")
-            self.convert_to_mp4(ts_file, mp4_file)
-            os.remove(ts_file)
+                percent = ((i + 1) / total) * 100
+                elapsed = time.time() - start_time
+                speed = downloaded_bytes / 1024 / 1024 / elapsed if elapsed > 0 else 0
+                mb_done = downloaded_bytes / 1024 / 1024
+                mb_total = (playlist.media_sequence + total) * 0.15  # estimate if unknown
+                if self.progress_callback:
+                    self.progress_callback(self.name, percent, mb_done, mb_total, speed)
 
-            self.done_callback(self.name, True, f"Saved as {os.path.basename(mp4_file)}")
+            # Combine .ts files into final .mp4
+            with open(output_path, "wb") as out_file:
+                for seg_file in segment_files:
+                    with open(seg_file, "rb") as f:
+                        out_file.write(f.read())
+                    os.remove(seg_file)
+
+            self.done_callback(self.name, True, "Download completed.")
+
         except Exception as e:
-            self.done_callback(self.name, False, str(e))
-
-    def convert_to_mp4(self, input_path, output_path):
-        subprocess.run(
-            ['ffmpeg', '-y', '-i', input_path, '-c', 'copy', output_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+            self.done_callback(self.name, False, f"Error: {str(e)}")
