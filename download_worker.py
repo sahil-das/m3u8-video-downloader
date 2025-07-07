@@ -17,34 +17,48 @@ class DownloadWorker(threading.Thread):
         self._pause_event.set()
         self._cancelled = False
 
-    def run(self):
-        try:
-            playlist = m3u8.load(self.url)
-            if not playlist.segments:
-                raise Exception("No segments found.")
+def run(self):
+    try:
+        output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
+        total_segments = len(self.segment_urls)
+        downloaded_mb = 0
+        start_time = time.time()
 
-            total_segments = len(playlist.segments)
-            file_path = os.path.join(self.output_dir, f"{self.name}.mp4")
-            with open(file_path, 'wb') as f:
-                for i, segment in enumerate(playlist.segments):
-                    self._pause_event.wait()
+        with open(output_path, "wb") as f:
+            for idx, segment_url in enumerate(self.segment_urls):
+                if self._cancelled:
+                    break
+                self._pause_event.wait()  # Pauses here if needed
+
+                response = requests.get(segment_url, stream=True)
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
                     if self._cancelled:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                        return
+                        break
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_mb += len(chunk) / (1024 * 1024)
 
-                    segment_url = urljoin(self.url, segment.uri)
-                    content = requests.get(segment_url, timeout=10).content
-                    f.write(content)
+                percent = ((idx + 1) / total_segments) * 100
+                elapsed = time.time() - start_time + 0.1
+                speed = downloaded_mb / elapsed
+                self.progress_callback(self.name, percent, downloaded_mb, self.total_mb, speed)
 
-                    percent = ((i + 1) / total_segments) * 100
-                    downloaded_mb = f.tell() / (1024 * 1024)
-                    total_mb = (total_segments * len(content)) / (1024 * 1024)
-                    speed = 0
-                    self.progress_callback(self.name, percent, downloaded_mb, total_mb, speed)
-            self.done_callback(self.name, True, "Download completed.")
-        except Exception as e:
-            self.done_callback(self.name, False, str(e))
+        # If cancelled, delete temp file AFTER closing it
+        if self._cancelled:
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except Exception as e:
+                    print(f"[{self.name}] Error deleting file: {e}")
+            self.done_callback(self.name, False, "Download Cancelled")
+            return
+
+        self.done_callback(self.name, True, "Download Complete")
+
+    except Exception as e:
+        print(f"[{self.name}] Error: {e}")
+        self.done_callback(self.name, False, str(e))
+
 
     def pause(self):
         self._pause_event.clear()
