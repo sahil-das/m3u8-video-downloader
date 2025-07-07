@@ -6,7 +6,7 @@ import uuid
 import webbrowser
 
 class M3U8DownloaderGUI:
-def init(self):
+def __init__(self):
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 self.app = ctk.CTk()
