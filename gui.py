@@ -27,14 +27,20 @@ class M3U8DownloaderGUI:
         control_frame = ctk.CTkFrame(self.app)
         control_frame.pack(pady=5, fill="x", padx=10)
 
+        self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder, width=150)
+        self.folder_button.grid(row=0, column=0, padx=10, pady=(10, 2), sticky="w")  
         
+        # --- In __init__() or setup ---
         self.folder_entry = ctk.CTkEntry(control_frame, width=500)
         self.folder_entry.insert(0, "No folder selected")
-        self.folder_entry.configure(state="normal", text_color="gray")
+        self.folder_entry.configure(text_color="gray")
         self.folder_entry.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
+        
+        # Bind focus-in/focus-out behavior
+        self.folder_entry.bind("<FocusIn>", self.clear_placeholder)
+        self.folder_entry.bind("<FocusOut>", self.restore_placeholder)
+        
 
-        self.folder_button = ctk.CTkButton(control_frame, text="📁 Select Folder", command=self.select_folder, width=150)
-        self.folder_button.grid(row=0, column=0, padx=10, pady=(10, 2), sticky="w")
 
         self.parallel_label = ctk.CTkLabel(control_frame, text="Maximum Parallel Downloads")
         self.parallel_label.grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
@@ -59,6 +65,19 @@ class M3U8DownloaderGUI:
         self.scrollable_frame = ctk.CTkScrollableFrame(self.app, width=870, height=450)
         self.scrollable_frame.pack(pady=10)
 
+
+    def clear_placeholder(self, event=None):
+        current = self.folder_entry.get()
+        if current == "No folder selected":
+            self.folder_entry.delete(0, ctk.END)
+            self.folder_entry.configure(text_color="white")
+    
+    def restore_placeholder(self, event=None):
+        current = self.folder_entry.get().strip()
+        if not current:
+            self.folder_entry.insert(0, "No folder selected")
+            self.folder_entry.configure(text_color="gray")
+
     def set_parallel(self, value):
         self.max_parallel = int(value)
 
@@ -66,17 +85,19 @@ class M3U8DownloaderGUI:
         folder = filedialog.askdirectory()
         if folder:
             self.output_dir = folder
-            self.folder_entry.configure(state="normal", text_color="lightgreen")
+            self.folder_entry.configure(text_color="lightgreen")
             self.folder_entry.delete(0, ctk.END)
             self.folder_entry.insert(0, folder)
+    
 
     def start_download(self):
         folder_input = self.folder_entry.get().strip()
-        if folder_input and os.path.isdir(folder_input):
+        if folder_input != "No folder selected" and os.path.isdir(folder_input):
             self.output_dir = folder_input
         if not self.output_dir:
             messagebox.showwarning("Folder Required", "Please select or enter a valid folder before starting download.")
             return
+
 
         self.url_entry.delete(0, ctk.END)
         self.name_entry.delete(0, ctk.END)
