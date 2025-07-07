@@ -99,16 +99,19 @@ class DownloadWorker(threading.Thread):
                 ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
                 "-i", list_path, "-c", "copy", output_path
             ]
-
-            logging.info("Running FFmpeg command: %s", ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in ffmpeg_cmd))
-
-            result = subprocess.run(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
+            
+            try:
+                result = subprocess.run(
+                    ffmpeg_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW  # 👈 Prevents console flashing
+                )
+            except FileNotFoundError:
+                self._safe_done_callback(False, "FFmpeg not found. Please install it or ensure it's in the package.")
+                return
+            
             if result.returncode != 0:
                 logging.error("FFmpeg error:\n%s", result.stderr)
                 self._safe_done_callback(False, f"FFmpeg error:\n{result.stderr.strip()}")
