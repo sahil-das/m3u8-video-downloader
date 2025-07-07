@@ -91,6 +91,13 @@ class M3U8DownloaderGUI:
     
 
     def start_download(self):
+        url = self.url_entry.get().strip()
+        custom_name = self.name_entry.get().strip()
+        
+        if not url:
+            messagebox.showerror("URL Required", "Please enter a valid M3U8 URL.")
+            return
+    
         folder_input = self.folder_entry.get().strip()
         if folder_input != "No folder selected" and os.path.isdir(folder_input):
             self.output_dir = folder_input
@@ -98,23 +105,17 @@ class M3U8DownloaderGUI:
             messagebox.showwarning("Folder Required", "Please select or enter a valid folder before starting download.")
             return
     
-        url = self.url_entry.get().strip()
-        if not url:
-            messagebox.showwarning("URL Required", "Please enter an M3U8 URL.")
-            return
-    
-        custom_name = self.name_entry.get().strip()
         self.url_entry.delete(0, ctk.END)
         self.name_entry.delete(0, ctk.END)
     
-        name = custom_name if custom_name else str(uuid.uuid4())[:8]
-        file_name = f"{name}.mp4" if not name.endswith(".mp4") else name
+        short_name = custom_name if custom_name else str(uuid.uuid4())[:8]
+        file_name = short_name + ".mp4"
     
-        # UI Setup
+        # UI Frame
         frame = ctk.CTkFrame(self.scrollable_frame)
         frame.pack(padx=10, pady=5, fill="x")
     
-        title_text = name if custom_name else (url[:80] + "...")
+        title_text = custom_name if custom_name else url[:80] + "..."
         title = ctk.CTkLabel(frame, text=title_text, anchor="w", font=ctk.CTkFont(weight="bold"))
         title.pack(anchor="w", padx=10, pady=(5, 0))
     
@@ -136,7 +137,8 @@ class M3U8DownloaderGUI:
         pause_btn.grid(row=0, column=0, padx=5)
         cancel_btn.grid(row=0, column=1, padx=5)
     
-        self.downloads[name] = {
+        # Save using short_name as key
+        self.downloads[short_name] = {
             "url": url,
             "progress": progress,
             "status": status,
@@ -145,14 +147,13 @@ class M3U8DownloaderGUI:
             "file_label": file_label,
             "frame": frame,
             "paused": False,
-            "custom_name": os.path.splitext(file_name)[0],  # without .mp4 for internal use
-            "file_name": file_name  # complete file name with extension
+            "custom_name": short_name
         }
     
-        pause_btn.configure(command=lambda: self.toggle_pause(name))
-        cancel_btn.configure(command=lambda: self.cancel_download(name))
+        pause_btn.configure(command=lambda: self.toggle_pause(short_name))
+        cancel_btn.configure(command=lambda: self.cancel_download(short_name))
     
-        self.queue.append((name, url))
+        self.queue.append((short_name, url))
         self.try_start_next()
 
     def try_start_next(self):
@@ -172,10 +173,9 @@ class M3U8DownloaderGUI:
 
     def start_worker(self, name, url):
         self.active_downloads += 1
-        file_name = self.downloads[name]["file_name"]
-
+        file_name = self.downloads[name]["custom_name"] + ".mp4"
         worker = DownloadWorker(
-            name=file_name,
+            name=name,  # <=== Pass short_name only
             url=url,
             output_dir=self.output_dir,
             progress_callback=self.update_progress,
