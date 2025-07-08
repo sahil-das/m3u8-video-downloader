@@ -1,0 +1,8 @@
+{
+    "output_dir": "C:/Users/sahil/OneDrive/Desktop",
+    "num_connections": 8,
+    "max_parallel": 5,
+    "ffmpeg_path": "ffmpeg",
+    "theme": "system",
+    "enable_notifications": true
+}

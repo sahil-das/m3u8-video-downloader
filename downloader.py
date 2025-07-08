@@ -1,0 +1,195 @@
+import threading
+import requests
+import os
+import time
+import m3u8
+import subprocess
+import shutil
+import sys
+from urllib.parse import urljoin
+from queue import Queue
+from settings import load_settings
+
+settings = load_settings()
+
+class DownloadWorker(threading.Thread):
+    def __init__(self, name, url, output_dir, progress_callback, done_callback, num_connections=8):
+        super().__init__()
+        self.name = name
+        self.url = url
+        self.output_dir = output_dir
+        self.progress_callback = progress_callback
+        self.done_callback = done_callback
+        self.num_connections = num_connections
+        self._pause = threading.Event()
+        self._pause.set()
+        self._cancel = False
+        self.segment_dir = None
+        self.max_retries = 3
+        self.daemon = True
+        
+    def pause(self):
+        self._pause.clear()
+
+    def resume(self):
+        self._pause.set()
+
+    def cancel(self):
+        self._cancel = True
+        self._pause.set()
+
+    def run(self):
+        try:
+            # Load and parse M3U8 playlist
+            playlist = m3u8.load(self.url)
+            if playlist.is_variant and playlist.playlists:
+                playlist = m3u8.load(urljoin(self.url, playlist.playlists[0].uri))
+
+            segments = playlist.segments
+            if not segments:
+                self.done_callback(self.name, False, "No segments found.")
+                return
+
+            segment_ext = os.path.splitext(segments[0].uri)[1] or ".ts"
+            self.segment_dir = os.path.join(self.output_dir, f"{self.name}_segments")
+            os.makedirs(self.segment_dir, exist_ok=True)
+
+            # AES decryption key handling
+            key = None
+            iv = None
+            if playlist.keys and playlist.keys[0]:
+                key_uri = playlist.keys[0].uri
+                if key_uri:
+                    try:
+                        key_url = urljoin(self.url, key_uri)
+                        key = requests.get(key_url, timeout=10).content
+                        iv = playlist.keys[0].iv
+                    except Exception as e:
+                        self.done_callback(self.name, False, f"Failed to download AES key: {e}")
+                        return
+
+            # Prepare queue of segments
+            queue = Queue()
+            for i, seg in enumerate(segments):
+                segment_url = seg.absolute_uri or urljoin(self.url, seg.uri)
+                queue.put((i, segment_url))
+
+            total = queue.qsize()
+            self.downloaded = 0
+            self.downloaded_bytes = 0
+            start_time = time.time()
+            threads = []
+
+            # Try importing AES
+            try:
+                from Crypto.Cipher import AES
+            except ImportError:
+                self.done_callback(self.name, False, "Missing dependency: pycryptodome. Install via 'pip install pycryptodome'")
+                return
+
+            def worker():
+                 while not queue.empty() and not self._cancel:
+                    self._pause.wait()
+                
+                    if self._cancel:
+                        break  # stop cleanly
+                
+                    try:
+                        i, segment_url = queue.get(timeout=1)
+                    except:
+                        continue
+                
+                    retry = 0
+                    while retry <= self.max_retries:
+                        if self._cancel:
+                            break
+                
+                        self._pause.wait()  # Pause mid-retry
+                        try:
+                            r = requests.get(segment_url, timeout=10)
+                            if r.status_code != 200:
+                                raise Exception(f"HTTP {r.status_code}")
+                            data = r.content
+                
+                            if key:
+                                iv_bytes = bytes.fromhex(iv[2:]) if iv else i.to_bytes(16, byteorder='big')
+                                cipher = AES.new(key, AES.MODE_CBC, iv_bytes)
+                                data = cipher.decrypt(data)
+                
+                            if self._cancel:
+                                break
+                
+                            seg_path = os.path.join(self.segment_dir, f"{i:05d}{segment_ext}")
+                            with open(seg_path, "wb") as f:
+                                f.write(data)
+                
+                            # Update stats
+                            self.downloaded += 1
+                            self.downloaded_bytes += len(data)
+                
+                            elapsed = time.time() - start_time + 0.1
+                            speed = self.downloaded_bytes / 1024 / 1024 / elapsed
+                            percent = (self.downloaded / total) * 100
+                            estimated_size = ((self.downloaded_bytes / self.downloaded) * total / 1024 / 1024) if self.downloaded else 0
+                
+                            self.progress_callback(self.name, percent, self.downloaded_bytes / 1024 / 1024, estimated_size, speed)
+                            break
+                        except Exception as e:
+                            retry += 1
+                            time.sleep(0.5 * retry)
+
+            for _ in range(self.num_connections):
+                t = threading.Thread(target=worker)
+                t.start()
+                threads.append(t)
+
+            for t in threads:
+                t.join()
+
+            if self._cancel:
+                self._cleanup()
+                self.done_callback(self.name, False, "Cancelled")
+                return
+
+            # Write concat input
+            input_txt = os.path.join(self.segment_dir, "segments.txt")
+            with open(input_txt, "w") as f:
+                for i in range(total):
+                    path = os.path.join(self.segment_dir, f"{i:05d}{segment_ext}").replace("\\", "/")
+                    f.write(f"file '{path}'\n")
+
+            # FFmpeg merge
+            output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
+            ffmpeg = settings.get("ffmpeg_path", "ffmpeg")
+
+            if not shutil.which(ffmpeg):
+                self._cleanup()
+                self.done_callback(self.name, False, f"FFmpeg not found: {ffmpeg}")
+                return
+
+            cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", input_txt, "-c", "copy", output_path]
+
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            result = subprocess.run(cmd, capture_output=True, startupinfo=startupinfo)
+
+
+            if result.returncode != 0:
+                self._cleanup()
+                err = result.stderr.decode().strip()
+                self.done_callback(self.name, False, f"FFmpeg error:\n{err}")
+                return
+
+            self._cleanup()
+            self.done_callback(self.name, True, f"Download complete: {output_path}")
+
+        except Exception as e:
+            self._cleanup()
+            self.done_callback(self.name, False, f"Error: {str(e)}")
+
+    def _cleanup(self):
+        if self.segment_dir and os.path.exists(self.segment_dir):
+            shutil.rmtree(self.segment_dir, ignore_errors=True)

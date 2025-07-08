@@ -7,6 +7,8 @@ __pycache__/
 build/
 *.spec
 
+splash.py
+
 # Virtual environment
 venv/
 .env/
