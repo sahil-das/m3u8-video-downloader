@@ -1,4 +1,3 @@
-# === downloader.py (Bug Fixes Applied) ===
 import threading
 import requests
 import os
@@ -8,7 +7,7 @@ import subprocess
 import shutil
 import sys
 from urllib.parse import urljoin
-from queue import Queue
+from queue import Queue, Empty
 from settings import load_settings
 
 settings = load_settings()
@@ -26,7 +25,8 @@ class DownloadWorker(threading.Thread):
         self._pause.set()
         self._cancel = False
         self.segment_dir = None
-        self.max_retries = 3
+        self.timeout = settings.get("timeout", 10)
+        self.max_retries = settings.get("max_retries", 3)
         self.daemon = True
 
     def pause(self):
@@ -41,6 +41,10 @@ class DownloadWorker(threading.Thread):
 
     def run(self):
         try:
+            if not os.access(self.output_dir, os.W_OK):
+                self.done_callback(self.name, False, "Output folder not writable.")
+                return
+
             playlist = m3u8.load(self.url)
             if playlist.is_variant and playlist.playlists:
                 playlist = m3u8.load(urljoin(self.url, playlist.playlists[0].uri))
@@ -61,8 +65,8 @@ class DownloadWorker(threading.Thread):
                 key_uri = playlist.keys[0].uri
                 if key_uri:
                     try:
-                        key_url = urljoin(self.url, key_uri)
-                        key = requests.get(key_url, timeout=10).content
+                        key_url = urljoin(playlist.base_uri or self.url, key_uri)
+                        key = requests.get(key_url, timeout=self.timeout).content
                         iv = playlist.keys[0].iv
                     except Exception as e:
                         self.done_callback(self.name, False, f"Failed to download AES key: {e}")
@@ -91,8 +95,8 @@ class DownloadWorker(threading.Thread):
                     if self._cancel:
                         break
                     try:
-                        i, segment_url = queue.get(timeout=1)
-                    except:
+                        i, segment_url = queue.get_nowait()
+                    except Empty:
                         continue
 
                     retry = 0
@@ -101,21 +105,34 @@ class DownloadWorker(threading.Thread):
                             break
                         self._pause.wait()
                         try:
-                            r = requests.get(segment_url, timeout=10)
+                            r = requests.get(segment_url, timeout=self.timeout)
                             if r.status_code != 200:
                                 raise Exception(f"HTTP {r.status_code}")
                             data = r.content
+                            
+                            if not data or len(data) < 128:  # arbitrary minimal threshold
+                                raise Exception(f"Incomplete segment ({len(data)} bytes)")
 
                             if key:
                                 try:
-                                    iv_bytes = bytes.fromhex(iv[2:]) if iv else i.to_bytes(16, byteorder='big')
+                                    if iv:
+                                        iv_clean = iv[2:] if iv.lower().startswith("0x") else iv
+                                        iv_bytes = bytes.fromhex(iv_clean)
+                                    else:
+                                        iv_bytes = i.to_bytes(16, byteorder='big')
+                                    cipher = AES.new(key, AES.MODE_CBC, iv_bytes)
+                                    data = cipher.decrypt(data)
                                 except Exception as e:
-                                    self.done_callback(self.name, False, f"Invalid IV format: {e}")
+                                    self.done_callback(self.name, False, f"Decryption failed: {e}")
                                     return
+
                                 cipher = AES.new(key, AES.MODE_CBC, iv_bytes)
                                 data = cipher.decrypt(data)
 
                             seg_path = os.path.join(self.segment_dir, f"{i:05d}{segment_ext}")
+                            if os.path.exists(seg_path):
+                                os.remove(seg_path)
+
                             with open(seg_path, "wb") as f:
                                 f.write(data)
 
@@ -146,10 +163,11 @@ class DownloadWorker(threading.Thread):
                 return
 
             input_txt = os.path.join(self.segment_dir, "segments.txt")
-            with open(input_txt, "w") as f:
+            with open(input_txt, "w", encoding="utf-8") as f:
                 for i in range(total):
                     path = os.path.join(self.segment_dir, f"{i:05d}{segment_ext}").replace("\\", "/")
-                    f.write(f"file '{path}'\n")
+                    safe_path = path.replace("'", "'\\''")
+                    f.write(f"file '{safe_path}'\n")
 
             output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
             ffmpeg = settings.get("ffmpeg_path", "ffmpeg")
