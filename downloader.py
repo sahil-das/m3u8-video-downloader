@@ -1,3 +1,4 @@
+# === downloader.py (Bug Fixes Applied) ===
 import threading
 import requests
 import os
@@ -27,7 +28,7 @@ class DownloadWorker(threading.Thread):
         self.segment_dir = None
         self.max_retries = 3
         self.daemon = True
-        
+
     def pause(self):
         self._pause.clear()
 
@@ -40,7 +41,6 @@ class DownloadWorker(threading.Thread):
 
     def run(self):
         try:
-            # Load and parse M3U8 playlist
             playlist = m3u8.load(self.url)
             if playlist.is_variant and playlist.playlists:
                 playlist = m3u8.load(urljoin(self.url, playlist.playlists[0].uri))
@@ -50,11 +50,11 @@ class DownloadWorker(threading.Thread):
                 self.done_callback(self.name, False, "No segments found.")
                 return
 
-            segment_ext = os.path.splitext(segments[0].uri)[1] or ".ts"
+            ext = os.path.splitext(segments[0].uri)[1]
+            segment_ext = ext if ext.lower() in [".ts", ".aac", ".mp4"] else ".ts"
             self.segment_dir = os.path.join(self.output_dir, f"{self.name}_segments")
             os.makedirs(self.segment_dir, exist_ok=True)
 
-            # AES decryption key handling
             key = None
             iv = None
             if playlist.keys and playlist.keys[0]:
@@ -68,7 +68,6 @@ class DownloadWorker(threading.Thread):
                         self.done_callback(self.name, False, f"Failed to download AES key: {e}")
                         return
 
-            # Prepare queue of segments
             queue = Queue()
             for i, seg in enumerate(segments):
                 segment_url = seg.absolute_uri or urljoin(self.url, seg.uri)
@@ -80,7 +79,6 @@ class DownloadWorker(threading.Thread):
             start_time = time.time()
             threads = []
 
-            # Try importing AES
             try:
                 from Crypto.Cipher import AES
             except ImportError:
@@ -88,50 +86,46 @@ class DownloadWorker(threading.Thread):
                 return
 
             def worker():
-                 while not queue.empty() and not self._cancel:
+                while not queue.empty() and not self._cancel:
                     self._pause.wait()
-                
                     if self._cancel:
-                        break  # stop cleanly
-                
+                        break
                     try:
                         i, segment_url = queue.get(timeout=1)
                     except:
                         continue
-                
+
                     retry = 0
                     while retry <= self.max_retries:
                         if self._cancel:
                             break
-                
-                        self._pause.wait()  # Pause mid-retry
+                        self._pause.wait()
                         try:
                             r = requests.get(segment_url, timeout=10)
                             if r.status_code != 200:
                                 raise Exception(f"HTTP {r.status_code}")
                             data = r.content
-                
+
                             if key:
-                                iv_bytes = bytes.fromhex(iv[2:]) if iv else i.to_bytes(16, byteorder='big')
+                                try:
+                                    iv_bytes = bytes.fromhex(iv[2:]) if iv else i.to_bytes(16, byteorder='big')
+                                except Exception as e:
+                                    self.done_callback(self.name, False, f"Invalid IV format: {e}")
+                                    return
                                 cipher = AES.new(key, AES.MODE_CBC, iv_bytes)
                                 data = cipher.decrypt(data)
-                
-                            if self._cancel:
-                                break
-                
+
                             seg_path = os.path.join(self.segment_dir, f"{i:05d}{segment_ext}")
                             with open(seg_path, "wb") as f:
                                 f.write(data)
-                
-                            # Update stats
+
                             self.downloaded += 1
                             self.downloaded_bytes += len(data)
-                
                             elapsed = time.time() - start_time + 0.1
                             speed = self.downloaded_bytes / 1024 / 1024 / elapsed
                             percent = (self.downloaded / total) * 100
                             estimated_size = ((self.downloaded_bytes / self.downloaded) * total / 1024 / 1024) if self.downloaded else 0
-                
+
                             self.progress_callback(self.name, percent, self.downloaded_bytes / 1024 / 1024, estimated_size, speed)
                             break
                         except Exception as e:
@@ -151,17 +145,14 @@ class DownloadWorker(threading.Thread):
                 self.done_callback(self.name, False, "Cancelled")
                 return
 
-            # Write concat input
             input_txt = os.path.join(self.segment_dir, "segments.txt")
             with open(input_txt, "w") as f:
                 for i in range(total):
                     path = os.path.join(self.segment_dir, f"{i:05d}{segment_ext}").replace("\\", "/")
                     f.write(f"file '{path}'\n")
 
-            # FFmpeg merge
             output_path = os.path.join(self.output_dir, f"{self.name}.mp4")
             ffmpeg = settings.get("ffmpeg_path", "ffmpeg")
-
             if not shutil.which(ffmpeg):
                 self._cleanup()
                 self.done_callback(self.name, False, f"FFmpeg not found: {ffmpeg}")
@@ -173,10 +164,8 @@ class DownloadWorker(threading.Thread):
             if sys.platform == "win32":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
+
             result = subprocess.run(cmd, capture_output=True, startupinfo=startupinfo)
-
-
             if result.returncode != 0:
                 self._cleanup()
                 err = result.stderr.decode().strip()
