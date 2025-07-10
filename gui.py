@@ -161,6 +161,14 @@ class DownloaderApp:
         self.root.destroy()
 
     # [Your download logic, callbacks, pause/cancel remain unchanged]
+    def remove_download(self, name):
+        w = self.download_widgets.get(name)
+        if w:
+            w["frame"].destroy()  # Remove UI
+            self.download_widgets.pop(name, None)
+            self.workers.pop(name, None)  # Cleanup worker if still present
+            self.log_box.insert("end", f"[{name}] Removed from list.\n")
+            self.log_box.see("end")
 
     def add_download_widget(self, name):
         frame = ctk.CTkFrame(self.scroll_area)
@@ -298,9 +306,23 @@ class DownloaderApp:
                     short_msg = msg.strip().splitlines()[0][:80] + "..." if len(msg) > 80 else msg.strip().splitlines()[0]
                     w["status"].configure(text=f"{icon} {short_msg}", text_color=color)
         
-                # Disable buttons
+                # Disable pause button
                 w["pause_btn"].configure(state="disabled")
-                w["cancel_btn"].configure(state="disabled")
+                
+                # Remove cancel button and add Remove button instead
+                w["cancel_btn"].destroy()  # Remove Cancel button
+                
+                remove_btn = ctk.CTkButton(
+                    w["pause_btn"].master,  # Same parent as Cancel/Pause
+                    text="Remove",
+                    width=80,
+                    fg_color="gray30",
+                    hover_color="gray40",
+                    text_color="white",
+                    command=lambda: self.remove_download(name)
+                )
+                remove_btn.grid(row=0, column=1, padx=5)  # Same position as old Cancel
+                w["remove_btn"] = remove_btn  # (Optional) track it
         
                 if msg.lower().startswith("cancelled"):
                     w["frame"].destroy()
