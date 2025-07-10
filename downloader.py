@@ -20,7 +20,11 @@ class DownloadWorker(threading.Thread):
         self.output_dir = output_dir
         self.progress_callback = progress_callback
         self.done_callback = done_callback
-        self.num_connections = num_connections
+        
+        # ✅ Validate num_connections
+        allowed_threads = [1, 2, 4, 8, 16, 32]
+        self.num_connections = num_connections if num_connections in allowed_threads else 8
+
         self._pause = threading.Event()
         self._pause.set()
         self._cancel = False
