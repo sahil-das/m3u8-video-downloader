@@ -1,16 +1,20 @@
-# settings.py
 import json
 import os
 
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = "m3u8_downloader_settings.json"
 
 DEFAULTS = {
-    "theme": "dark",
-    "num_connections": 3,
-    "segment_threads": 8,
     "output_dir": "",
-    "notifications": True
+    "num_connections": 8,
+    "max_parallel": 5,
+    "ffmpeg_path": "ffmpeg",
+    "theme": "dark",
+    "enable_notifications": True 
 }
+
+VALID_THREADS = [1, 2, 4, 8, 16, 32]
+MIN_PARALLEL = 1
+MAX_PARALLEL = 10
 
 def load_settings():
     if not os.path.exists(SETTINGS_FILE):
@@ -20,11 +24,25 @@ def load_settings():
     try:
         with open(SETTINGS_FILE, "r") as f:
             settings = json.load(f)
-        # fill in missing keys
+
+        # Fill missing keys with defaults
         for key, val in DEFAULTS.items():
             settings.setdefault(key, val)
+
+        # Validate num_connections
+        if settings.get("num_connections") not in VALID_THREADS:
+            settings["num_connections"] = DEFAULTS["num_connections"]
+
+        # Validate max_parallel
+        max_par = settings.get("max_parallel")
+        if not isinstance(max_par, int) or not (MIN_PARALLEL <= max_par <= MAX_PARALLEL):
+            settings["max_parallel"] = DEFAULTS["max_parallel"]
+
+        # Optionally save corrected settings
+        save_settings(settings)
+
         return settings
-    except:
+    except Exception:
         return DEFAULTS.copy()
 
 def save_settings(settings):
