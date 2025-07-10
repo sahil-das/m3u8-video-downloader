@@ -1,7 +1,7 @@
 {
-    "output_dir": "C:/Users/sahil/OneDrive/Desktop/downloader",
-    "num_connections": 1,
-    "max_parallel": 2,
+    "output_dir": "",
+    "num_connections": 8,
+    "max_parallel": 5,
     "ffmpeg_path": "ffmpeg",
     "theme": "dark",
     "enable_notifications": true
